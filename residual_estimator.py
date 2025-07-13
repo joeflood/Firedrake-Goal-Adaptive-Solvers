@@ -19,7 +19,6 @@ v = TestFunction(V)
 x, y = SpatialCoordinate(mesh)
 uexact = sin(pi*x) * cos(pi*y)
 f = - div(grad(uexact))
-#f = 1
 
 F = inner(grad(uh), grad(v))*dx - inner(f, v)*dx
 
@@ -75,7 +74,8 @@ test = TestFunction(DG0)
 
 # ========================== solve the dual problem ==========================
 
-dual_space = FunctionSpace(mesh, "Lagrange", degree) #Dual function space
+# Solve dual in degree + 1
+dual_space = FunctionSpace(mesh, "Lagrange", degree + 1) #Dual function space
 u_dual = TrialFunction(dual_space) # Symbolic trial function to differentiate F
 v_dual = TestFunction(dual_space) # Dual test function
 z = Function(dual_space) # Dual soluton
@@ -88,31 +88,15 @@ bcs_dual  = DirichletBC(dual_space, 0.0, "on_boundary")
 # Define goal functional
 ds = Measure("ds", domain=mesh)  # Boundary measure
 n = FacetNormal(mesh)
-# -------- Goal functional options: --------
+# Goal functional options:
 # J = inner(grad(v_dual), n) * ds # Boundary flux
 J = v_dual * dx
-solve(bilinear_form_adj == J, z, bcs_dual) 
 
-dual_space_high = FunctionSpace(mesh, "Lagrange", degree + 1)
-u_dual_high = TrialFunction(dual_space_high) # Symbolic trial function to differentiate F
-v_dual_high = TestFunction(dual_space_high) # Dual test function
-z_high = Function(dual_space_high) # Dual soluton
-J = v_dual_high * dx
+solve(bilinear_form_adj == J, z, bcs_dual) # Obtain z
 
-F_dual_high = inner(grad(z_high), grad(v_dual_high))*dx - inner(f, v_dual_high)*dx
-bilinear_form_high = derivative(F_dual_high, z_high)
-bilinear_form_adj_high = adjoint(bilinear_form_high)
-bcs_dual_high  = DirichletBC(dual_space_high, 0.0, "on_boundary")
-solve(bilinear_form_adj_high == J, z_high, bcs_dual_high)
-
-
-#z_high = Function(dual_space_high).interpolate(z)
-#zh = Function(dual_space).interpolate(z)
+dual_space_low = FunctionSpace(mesh, "Lagrange", degree) #Dual function space
+z_h = Function(dual_space_low).interpolate(z)
 zerr = z
-
-print("z      :", z.dat.data)        # writable view
-print("z_high :", z_high.dat.data)
-
 
 eta = assemble(inner(test*Rcell, zerr)*dx +  avg(inner(test*Rfacet,zerr))*dS + inner(test*Rfacet,zerr)*ds)
 with eta.dat.vec as evec:
@@ -122,16 +106,6 @@ print(eta.dat.data)
 
 total_eta = np.sum(eta.dat.data)
 print("Total error estimator:", total_eta)
-
-eta_z = assemble(inner(test*Rcell, z_high)*dx +  avg(inner(test*Rfacet,z_high))*dS + inner(test*Rfacet,z_high)*ds)
-with eta_z.dat.vec as evec_z:
-    evec_z.abs()
-
-print(eta_z.dat.data)
-
-total_eta_z = np.sum(eta_z.dat.data)
-print("Total error estimator:", total_eta_z)
-
 
 # Plot
 DG = FunctionSpace(mesh, "DG", degree=degree)
