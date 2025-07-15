@@ -1,7 +1,7 @@
 from firedrake import *
 
 
-mesh = UnitSquareMesh(8, 8, quadrilateral=True)
+mesh = UnitSquareMesh(5, 5, quadrilateral=False)
 degree = 1
 V = FunctionSpace(mesh, "CG", degree, variant="integral")
 

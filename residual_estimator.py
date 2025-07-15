@@ -17,15 +17,17 @@ v = TestFunction(V)
 
 # MMS Method of Manufactured Solution
 x, y = SpatialCoordinate(mesh)
-uexact = sin(pi*x) * cos(pi*y)
+uexact = 256*(1-x)*x*(1-y)*y*exp(-((x-0.5)**2+(y-0.5)**2)/10)
 f = - div(grad(uexact))
 
 F = inner(grad(uh), grad(v))*dx - inner(f, v)*dx
 
-bcs = DirichletBC(V, uexact, "on_boundary")
+bcs = [DirichletBC(V, uexact, "on_boundary")]
 
 solve(F == 0, uh, bcs=bcs)
 
+n = FacetNormal(mesh)
+J = dot(grad(uh), n)*ds
 
 def residual(F, test):
     v = F.arguments()[0]
@@ -80,23 +82,28 @@ u_dual = TrialFunction(dual_space) # Symbolic trial function to differentiate F
 v_dual = TestFunction(dual_space) # Dual test function
 z = Function(dual_space) # Dual soluton
 
-F_dual = inner(grad(z), grad(v_dual))*dx - inner(f, v_dual)*dx
-bilinear_form = derivative(F_dual, z)
-bilinear_form_adj = adjoint(bilinear_form)
-bcs_dual  = DirichletBC(dual_space, 0.0, "on_boundary")
+G = action(adjoint(derivative(F, uh, u_dual)), z) - derivative(J, uh, v_dual)
+G = replace(G, {v: v_dual})
+bcs_dual  = [bc.reconstruct(V=dual_space, g=0) for bc in bcs]
 
 # Define goal functional
 ds = Measure("ds", domain=mesh)  # Boundary measure
 n = FacetNormal(mesh)
 # Goal functional options:
 # J = inner(grad(v_dual), n) * ds # Boundary flux
-J = v_dual * dx
 
-solve(bilinear_form_adj == J, z, bcs_dual) # Obtain z
+solve(G == 0, z, bcs_dual) # Obtain z
+
+Juh = assemble(J)
+Ju = assemble(replace(J, {uh: uexact}))
+print(f"Global error estimator: {assemble(residual(F, z))}")
+print(f"J(u): {Ju} J(uh) = {Juh} J(uh) - J(u) = {Juh - Ju}")
+
+import sys; sys.exit(0)
 
 dual_space_low = FunctionSpace(mesh, "Lagrange", degree) #Dual function space
 z_h = Function(dual_space_low).interpolate(z)
-zerr = z
+zerr = z #- z_h
 
 eta = assemble(inner(test*Rcell, zerr)*dx +  avg(inner(test*Rfacet,zerr))*dS + inner(test*Rfacet,zerr)*ds)
 with eta.dat.vec as evec:
