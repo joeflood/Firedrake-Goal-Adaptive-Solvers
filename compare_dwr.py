@@ -35,7 +35,44 @@ G = action(adjoint(derivative(F, u, TrialFunction(Vf))), z) - derivative(J, u, v
 G = replace(G, {v: vz})
 bcs_dual  = [bc.reconstruct(V=Vf, g=0) for bc in bcs]
 
-solve(G == 0, z, bcs_dual) # Obtain z
+sp_chol = {"pc_type": "cholesky",
+           "pc_factor_mat_solver_type": "mumps"}
+sp_pmg = {"snes_type": "ksponly",
+          "ksp_type": "cg",
+          "ksp_rtol": 1.0e-10,
+          "ksp_max_it": 1,
+          "ksp_convergence_test": "skip",
+          "ksp_monitor": None,
+          "pc_type": "python",
+          "pc_python_type": "firedrake.P1PC",
+          "pmg_mg_coarse": {
+              "pc_type": "python",
+              "pc_python_type": "firedrake.AssembledPC",
+              "assembled_pc_type": "cholesky",
+          },
+          "pmg_mg_levels": {
+              "ksp_max_it": 1,
+              "ksp_type": "chebyshev",
+              "pc_type": "python",
+              "pc_python_type": "firedrake.ASMStarPC",
+              "pc_star_mat_ordering_type": "metisnd",
+              "pc_star_sub_sub_pc_type": "cholesky",
+          }
+      }
+sp_star = {"snes_type": "ksponly",
+          "ksp_type": "cg",
+          "ksp_rtol": 1.0e-10,
+          "ksp_max_it": 5,
+          "ksp_convergence_test": "skip",
+          "ksp_monitor": None,
+          "pc_type": "python",
+          "pc_python_type": "firedrake.ASMStarPC",
+          "pc_star_mat_ordering_type": "metisnd",
+          "pc_star_sub_sub_pc_type": "cholesky",
+          }
+
+
+solve(G == 0, z, bcs_dual, solver_parameters=sp_star) # Obtain z
 
 Juh = assemble(J)
 Ju = assemble(replace(J, {u: u_exact}))

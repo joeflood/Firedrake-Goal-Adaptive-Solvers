@@ -99,8 +99,6 @@ Ju = assemble(replace(J, {uh: uexact}))
 print(f"Global error estimator: {assemble(residual(F, z))}")
 print(f"J(u): {Ju} J(uh) = {Juh} J(uh) - J(u) = {Juh - Ju}")
 
-import sys; sys.exit(0)
-
 dual_space_low = FunctionSpace(mesh, "Lagrange", degree) #Dual function space
 z_h = Function(dual_space_low).interpolate(z)
 zerr = z #- z_h
