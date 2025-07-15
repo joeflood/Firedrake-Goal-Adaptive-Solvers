@@ -115,3 +115,64 @@ print("Local error estimators: ")
 print(eta.dat.data)
 
 print(f"Sum of local error estimators: {sum(eta.dat.data)}")
+
+# Insert automatic computation:
+
+cell = mesh.ufl_cell()  #Returns the cell from the mesh
+dim = mesh.topological_dimension() # Dimension of the mesh 
+variant = "integral" # Finite element type 
+
+# ---------------- Equation 4.6 to find cell residual Rcell -------------------------
+B = FunctionSpace(mesh, "B", dim+1, variant=variant)
+bubbles = Function(B).assign(1)
+
+DG = FunctionSpace(mesh, "DG", degree, variant=variant)
+uc = TrialFunction(DG)
+vc = TestFunction(DG)
+ac = inner(uc, bubbles*vc)*dx
+Lc = residual(F, bubbles*vc)
+
+Rcell = Function(DG, name="Rcell")
+solve(ac == Lc, Rcell)
+
+def both(u):
+    return u("+") + u("-")
+
+# ---------------- Equation 4.8 to find facet residual Rfacet -------------------------
+FB = FunctionSpace(mesh, "FB", dim, variant=variant)
+cones = Function(FB).assign(1)
+
+el = BrokenElement(FiniteElement("FB", cell=cell, degree=degree+dim, variant=variant))
+Q = FunctionSpace(mesh, el)
+q = TestFunction(Q)
+p = TrialFunction(Q)
+Lf = residual(F, q) - inner(Rcell, q)*dx
+af = both(inner(p/cones, q))*dS + inner(p/cones, q)*ds
+
+Rhat = Function(Q)
+solve(af == Lf, Rhat)
+
+
+el = BrokenElement(FiniteElement("DGT", cell=cell, degree=degree, variant=variant))
+DGT = FunctionSpace(mesh, el)
+#Rfacet = Function(DGT).interpolate(Rhat/cones)
+Rfacet = Rhat/cones
+
+DG0 = FunctionSpace(mesh, "DG", degree=0)
+test = TestFunction(DG0)
+
+eta_T = assemble(inner(test*Rcell, z_err)*dx +  avg(inner(test*Rfacet,z_err))*dS + inner(test*Rfacet,z_err)*ds)
+with eta_T.dat.vec as evec:
+    evec.abs()
+
+print("Automatically computed local error estimates:")
+print(eta_T.dat.data)
+
+total_eta = np.sum(eta_T.dat.data)
+print("Automatic total error estimator:", total_eta)
+
+
+difference = eta_T.dat.data - eta.dat.data
+percentage = difference / eta.dat.data * 100
+print("Percentage difference relative to local method:")
+print(percentage)
