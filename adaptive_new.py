@@ -1,7 +1,7 @@
 from firedrake import *
 from netgen.occ import *
 
-nx = 5  #Mesh size
+nx = 10  #Mesh size
 degree = 1 # Solution polynomial degree
 variant = "integral" # Finite element type 
 
@@ -43,7 +43,7 @@ z = Function(dual_space) # Dual soluton
 F_dual = inner(grad(z), grad(v_dual))*dx - inner(f, v_dual)*dx
 bilinear_form = derivative(F_dual, z)
 bilinear_form_adj = adjoint(bilinear_form)
-bcs_dual  = DirichletBC(dual_space, 0.0, "on_boundary")
+bcs_dual  = DirichletBC(dual_space, 0.0, "on_boundary") # Use homogenize instead
 
 # Define goal functional
 ds = Measure("ds", domain=mesh)  # Boundary measure
@@ -102,7 +102,12 @@ Rfacet = Rhat/cones
 # 8. Compute error indicators eta_T 
 DG0 = FunctionSpace(mesh, "DG", degree=0)
 test = TestFunction(DG0)
-eta = assemble(inner(test*Rcell, zerr)*dx +  avg(inner(test*Rfacet,zerr))*dS + inner(test*Rfacet,zerr)*ds)
+#eta = assemble(inner(test*Rcell, zerr)*dx +  avg(inner(test*Rfacet,zerr))*dS + inner(test*Rfacet,zerr)*ds)
+
+eta = Function(DG0)
+G = - inner(eta, test) + inner(test*Rcell, zerr)*dx +  avg(inner(test*Rfacet,zerr))*dS + inner(test*Rfacet,zerr)*ds
+sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
+solve(G == 0, eta, solver_parameters=sp)
 
 with eta.dat.vec as evec:
     evec.abs()

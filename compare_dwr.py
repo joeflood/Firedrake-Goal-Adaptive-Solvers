@@ -11,7 +11,7 @@ v = TestFunction(V)
 
 # MMS Method of Manufactured Solution
 (x, y) = SpatialCoordinate(u.function_space().mesh())
-u_exact = 256*(1-x)*x*(1-y)*y*exp(-((x-0.5)**2+(y-0.5)**2)/10)
+u_exact = (x**2*y + 3*x*y**2) * exp(-2*x**2) * sin(pi * x * y)
 f = -div(grad(u_exact))
 
 F = inner(grad(u), grad(v))*dx - inner(f, v)*dx
@@ -62,7 +62,7 @@ sp_pmg = {"snes_type": "ksponly",
 sp_star = {"snes_type": "ksponly",
           "ksp_type": "cg",
           "ksp_rtol": 1.0e-10,
-          "ksp_max_it": 5,
+          "ksp_max_it": 10,
           "ksp_convergence_test": "skip",
           "ksp_monitor": None,
           "pc_type": "python",
@@ -111,8 +111,8 @@ solve(Omega == 0, omega, solver_parameters=dgsp)
 eta = Function(W, name="LocalErrorEstimate")
 eta.interpolate(rho*omega)
 
-print("Local error estimators: ")
-print(eta.dat.data)
+#print("Local error estimators: ")
+#print(eta.dat.data)
 
 print(f"Sum of local error estimators: {sum(eta.dat.data)}")
 
@@ -123,26 +123,29 @@ dim = mesh.topological_dimension() # Dimension of the mesh
 variant = "integral" # Finite element type 
 
 # ---------------- Equation 4.6 to find cell residual Rcell -------------------------
-B = FunctionSpace(mesh, "B", dim+1, variant=variant)
-bubbles = Function(B).assign(1)
+residual_degree = degree + 1
 
-DG = FunctionSpace(mesh, "DG", degree, variant=variant)
+B = FunctionSpace(mesh, "B", dim+1, variant=variant) # Bubble function space
+bubbles = Function(B).assign(1) # Bubbles
+
+# Discontinuous function space of Rcell polynomials
+DG = FunctionSpace(mesh, "DG", residual_degree, variant=variant)
 uc = TrialFunction(DG)
 vc = TestFunction(DG)
 ac = inner(uc, bubbles*vc)*dx
 Lc = residual(F, bubbles*vc)
 
-Rcell = Function(DG, name="Rcell")
-solve(ac == Lc, Rcell)
+Rcell = Function(DG, name="Rcell") # Rcell polynomial
+solve(ac == Lc, Rcell) # solve for Rcell polynonmial
 
 def both(u):
     return u("+") + u("-")
 
 # ---------------- Equation 4.8 to find facet residual Rfacet -------------------------
-FB = FunctionSpace(mesh, "FB", dim, variant=variant)
-cones = Function(FB).assign(1)
+FB = FunctionSpace(mesh, "FB", dim, variant=variant) # Cone function space
+cones = Function(FB).assign(1) # Cones
 
-el = BrokenElement(FiniteElement("FB", cell=cell, degree=degree+dim, variant=variant))
+el = BrokenElement(FiniteElement("FB", cell=cell, degree=residual_degree+dim, variant=variant))
 Q = FunctionSpace(mesh, el)
 q = TestFunction(Q)
 p = TrialFunction(Q)
@@ -151,28 +154,88 @@ af = both(inner(p/cones, q))*dS + inner(p/cones, q)*ds
 
 Rhat = Function(Q)
 solve(af == Lf, Rhat)
-
-
-el = BrokenElement(FiniteElement("DGT", cell=cell, degree=degree, variant=variant))
-DGT = FunctionSpace(mesh, el)
-#Rfacet = Function(DGT).interpolate(Rhat/cones)
 Rfacet = Rhat/cones
 
+# Extra code - another way of accomplishing the same outcome?
+#el = BrokenElement(FiniteElement("DGT", cell=cell, degree=residual_degree, variant=variant))
+#DGT = FunctionSpace(mesh, el)
+#Rfacet = Function(DGT).interpolate(Rhat/cones)
+
+
+L2_Rcell = sqrt(assemble(inner(Rcell, Rcell) * dx))
+print("‖Rcell‖_L2(Ω) =", L2_Rcell)
+
+# Rfacet L2 norms:
+# boundary L2
+L2_boundary = sqrt(assemble(inner(Rfacet, Rfacet)*ds))
+print("‖Rfacet‖_L2(boundary) =", L2_boundary)
+
+# interior facet L2 (average)
+L2_interior = sqrt(assemble(inner(avg(Rfacet), avg(Rfacet))*dS))
+print("‖Rfacet‖_L2(interior) =", L2_interior)
 DG0 = FunctionSpace(mesh, "DG", degree=0)
 test = TestFunction(DG0)
 
-eta_T = assemble(inner(test*Rcell, z_err)*dx +  avg(inner(test*Rfacet,z_err))*dS + inner(test*Rfacet,z_err)*ds)
+#eta_T = assemble(inner(test*Rcell, z_err)*dx +  avg(inner(test*Rfacet,z_err))*dS + inner(test*Rfacet,z_err)*ds)
+
+eta_T = Function(DG0)
+G = (
+     inner(eta_T / vol, test)*dx
+     - inner(inner(Rcell, z_err), test)*dx + 
+     - inner(avg(inner(Rfacet,z_err)), both(test))*dS + 
+     - inner(inner(Rfacet,z_err), test)*ds
+ )
+
+sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
+solve(G == 0, eta_T, solver_parameters=sp)
+
+
 with eta_T.dat.vec as evec:
     evec.abs()
 
-print("Automatically computed local error estimates:")
-print(eta_T.dat.data)
+#print("Automatically computed local error estimates:")
+#print(eta_T.dat.data)
 
 total_eta = np.sum(eta_T.dat.data)
 print("Automatic total error estimator:", total_eta)
 
 
-difference = eta_T.dat.data - eta.dat.data
-percentage = difference / eta.dat.data * 100
-print("Percentage difference relative to local method:")
-print(percentage)
+factor = eta_T.dat.data / eta.dat.data
+#print("Factor relative to local method:")
+#print(factor)
+
+
+# Exact facet residuals
+eta_manual = Function(DG0)
+
+n = FacetNormal(mesh)
+
+H = (
+    inner(eta_manual / vol, test)*dx
+     - inner(f + div(grad(u)), z_err * test) * dx
+     - 0.5 * inner(jump(-grad(u), n), z_err * test('+')) * dS
+     - 0.5 * inner(jump(-grad(u), n), z_err * test('-')) * dS
+     - inner(dot(-grad(u), n), z_err * test) * ds
+)
+
+# Each cell is an independent 1x1 solve, so Jacobi is exact
+sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
+solve(H == 0, eta_manual, solver_parameters=sp)
+
+with eta_manual.dat.vec as evec:
+    evec.abs()
+
+#print("Manually computed local error estimates:")
+
+#print(eta_manual.dat.data)
+manual_total = np.sum(eta_manual.dat.data)
+print("Manual total error estiamtor: ", manual_total)
+
+
+difference = (eta_manual.dat.data - eta_T.dat.data)
+#print("Difference:")
+#print(difference)
+
+
+total_difference = np.sum(difference)
+print("Total difference:", total_difference)
