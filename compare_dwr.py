@@ -11,7 +11,7 @@ v = TestFunction(V)
 
 # MMS Method of Manufactured Solution
 (x, y) = SpatialCoordinate(u.function_space().mesh())
-u_exact = (x**2*y + 3*x*y**2) * exp(-2*x**2) * sin(pi * x * y)
+u_exact = (x**2*y + 3*x*y**2)
 f = -div(grad(u_exact))
 
 F = inner(grad(u), grad(v))*dx - inner(f, v)*dx
@@ -71,7 +71,6 @@ sp_star = {"snes_type": "ksponly",
           "pc_star_sub_sub_pc_type": "cholesky",
           }
 
-
 solve(G == 0, z, bcs_dual, solver_parameters=sp_star) # Obtain z
 
 Juh = assemble(J)
@@ -100,7 +99,7 @@ solve(Rho == 0, rho, solver_parameters=dgsp)
 
 z_lo = Function(V, name="LowOrderDualSolution")
 z_lo.interpolate(z)
-z_err = z - z_lo
+z_err = z
 Omega = (
           inner(omega / vol, w)*dx
         - inner(sqrt(inner(z_err, z_err)), w)*dx
@@ -114,7 +113,7 @@ eta.interpolate(rho*omega)
 #print("Local error estimators: ")
 #print(eta.dat.data)
 
-print(f"Sum of local error estimators: {sum(eta.dat.data)}")
+print(f"Sum of local error estimators (Rannacher): {sum(eta.dat.data)}")
 
 # Insert automatic computation:
 
@@ -176,18 +175,18 @@ print("‖Rfacet‖_L2(interior) =", L2_interior)
 DG0 = FunctionSpace(mesh, "DG", degree=0)
 test = TestFunction(DG0)
 
-#eta_T = assemble(inner(test*Rcell, z_err)*dx +  avg(inner(test*Rfacet,z_err))*dS + inner(test*Rfacet,z_err)*ds)
+eta_T = assemble(inner(test*Rcell, z_err)*dx +  avg(inner(test*Rfacet,z_err))*dS + inner(test*Rfacet,z_err)*ds)
 
-eta_T = Function(DG0)
-G = (
-     inner(eta_T / vol, test)*dx
-     - inner(inner(Rcell, z_err), test)*dx + 
-     - inner(avg(inner(Rfacet,z_err)), both(test))*dS + 
-     - inner(inner(Rfacet,z_err), test)*ds
- )
+# eta_T = Function(DG0)
+# G = (
+#      inner(eta_T / vol, test)*dx
+#      - inner(inner(Rcell, z_err), test)*dx + 
+#      - inner(avg(inner(Rfacet,z_err)), both(test))*dS + 
+#      - inner(inner(Rfacet,z_err), test)*ds
+#  )
 
-sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
-solve(G == 0, eta_T, solver_parameters=sp)
+# sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
+# solve(G == 0, eta_T, solver_parameters=sp)
 
 
 with eta_T.dat.vec as evec:
@@ -229,7 +228,7 @@ with eta_manual.dat.vec as evec:
 
 #print(eta_manual.dat.data)
 manual_total = np.sum(eta_manual.dat.data)
-print("Manual total error estiamtor: ", manual_total)
+print("Manual total error estimator: ", manual_total)
 
 
 difference = (eta_manual.dat.data - eta_T.dat.data)
