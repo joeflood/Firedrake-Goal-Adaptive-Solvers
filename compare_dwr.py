@@ -135,7 +135,11 @@ ac = inner(uc, bubbles*vc)*dx
 Lc = residual(F, bubbles*vc)
 
 Rcell = Function(DG, name="Rcell") # Rcell polynomial
-solve(ac == Lc, Rcell) # solve for Rcell polynonmial
+residual_sp = {"snes_type": "ksponly",
+               "ksp_type": "preonly",
+               "pc_type": "hypre",
+               "pc_hypre_type": "pilut"}
+solve(ac == Lc, Rcell, solver_parameters=residual_sp) # solve for Rcell polynonmial
 
 def both(u):
     return u("+") + u("-")
@@ -152,7 +156,7 @@ Lf = residual(F, q) - inner(Rcell, q)*dx
 af = both(inner(p/cones, q))*dS + inner(p/cones, q)*ds
 
 Rhat = Function(Q)
-solve(af == Lf, Rhat)
+solve(af == Lf, Rhat, solver_parameters=residual_sp)
 Rfacet = Rhat/cones
 
 # Extra code - another way of accomplishing the same outcome?
