@@ -21,13 +21,14 @@ mesh = Mesh(ngmesh)
 VTKFile("adaptivemesh_unrefined.pvd").write(mesh)
 
 # Solver parameters
-degree = 1
-max_iterations = 10
+degree = 1 # Primal problem degree
 dual_solve_method = "high_order" # Options: high_order, star
+dual_solve_degree = degree + 1 # If dual_solve_method = "high_order", select dual solve degree
 residual_solve_method = "automatic" # Options: manual, automatic
-residual_degree = degree + 0 # Degree of residuals 
-dorfler_alpha = 0.5
-tolerance = 0.005
+residual_degree = degree # Degree of residuals 
+dorfler_alpha = 0.5 # Dorfler marking 'M' 
+tolerance = 0.001 # Dual solution tolerance (TERMINATION condition)
+max_iterations = 10 # Max adaptive iterations (TERMINATION condition)
 
 # Output vectors
 N_vec = []
@@ -119,7 +120,7 @@ for it in range(max_iterations):
                 "assembled_pc_type": "cholesky",
             },
             "pmg_mg_levels": {
-                "ksp_max_it": 1,
+                "ksp_max_it": 10,
                 "ksp_type": "chebyshev",
                 "pc_type": "python",
                 "pc_python_type": "firedrake.ASMStarPC",
@@ -138,18 +139,25 @@ for it in range(max_iterations):
             "pc_star_mat_ordering_type": "metisnd",
             "pc_star_sub_sub_pc_type": "cholesky",
             }
+    residual_sp = {"snes_type": "ksponly",
+            "ksp_type": "preonly",
+            "pc_type": "hypre",
+            "pc_hypre_type": "pilut"}
 
     # Solve dual in degree + 1
-    Vf = FunctionSpace(mesh, "Lagrange", degree + 3) #Dual function space
+    Vf = FunctionSpace(mesh, "Lagrange", degree + 1) #Dual function space
     vz = TestFunction(Vf) # Dual test function
     z = Function(Vf) # Dual soluton
+
+    ndofs_dual = Vf.dim()
+    print("Ndual:" , ndofs_dual)
 
     G = action(adjoint(derivative(F, u, TrialFunction(Vf))), z) - derivative(J, u, vz)
     G = replace(G, {v: vz})
     bcs_dual  = [bc.reconstruct(V=Vf, g=0) for bc in bcs]
     
     if dual_solve_method == "high_order":
-        solve(G == 0, z, bcs_dual, solver_parameters=sp_pmg) # Obtain z
+        solve(G == 0, z, bcs_dual, solver_parameters=sp_chol) # Obtain z
         z_lo = Function(V, name="LowOrderDualSolution")
         z_lo.interpolate(z)
         z_err = z - z_lo
@@ -188,7 +196,7 @@ for it in range(max_iterations):
         bubbles = Function(B).assign(1) # Bubbles
 
         # Discontinuous function space of Rcell polynomials
-        DG = FunctionSpace(mesh, "DG", residual_degree, variant=variant)
+        DG = FunctionSpace(mesh, "DG", degree=residual_degree, variant=variant)
         uc = TrialFunction(DG)
         vc = TestFunction(DG)
         ac = inner(uc, bubbles*vc)*dx
@@ -196,7 +204,11 @@ for it in range(max_iterations):
 
         Rcell = Function(DG, name="Rcell") # Rcell polynomial
         print("Computing Rcells ...")
-        solve(ac == Lc, Rcell) # solve for Rcell polynonmial
+        residual_sp = {"snes_type": "ksponly",
+               "ksp_type": "preonly",
+               "pc_type": "hypre",
+               "pc_hypre_type": "pilut"}
+        solve(ac == Lc, Rcell, solver_parameters=residual_sp) # solve for Rcell polynonmial
 
         def both(u):
             return u("+") + u("-")
@@ -214,7 +226,8 @@ for it in range(max_iterations):
 
         Rhat = Function(Q)
         print("Computing Rhats ...")
-        solve(af == Lf, Rhat)
+        solve(af == Lf, Rhat, solver_parameters=residual_sp)
+        print("Computing Rfacets ... ")
         Rfacet = Rhat/cones
 
         # 8. Compute error indicators eta_T 
@@ -248,7 +261,7 @@ for it in range(max_iterations):
             - inner(f + div(grad(u)), z_err * test) * dx
             - 0.5 * inner(jump(-grad(u), n), z_err * test('+')) * dS
             - 0.5 * inner(jump(-grad(u), n), z_err * test('-')) * dS
-            - inner(dot(-grad(u), n), z_err * test) * ds
+            - inner(dot(-grad(u), n) - g, z_err * test) * ds
         )
 
         # Each cell is an independent 1x1 solve, so Jacobi is exact

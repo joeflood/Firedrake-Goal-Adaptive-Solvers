@@ -20,8 +20,6 @@ def solve_dual(mesh, F, bc, M, method = "deg"):
     else:
         print("Unkown dual solve method.")
     
-
-
     return z
 
 def estimate_goal_error(mesh, uh, F, M): #This is where the automatic part comes in
@@ -107,5 +105,6 @@ M = inner(grad(v), n) * ds
 max_iterations = 10
 tol = 0.1
 
-adaptive_solve(mesh, F, u, bc, M)
+dual_sol = solve_dual(mesh, F, bc, M)
 
+VTKFile()

@@ -1,0 +1,6 @@
+README.md
+pyproject.toml
+algorithm/algorithm.egg-info/PKG-INFO
+algorithm/algorithm.egg-info/SOURCES.txt
+algorithm/algorithm.egg-info/dependency_links.txt
+algorithm/algorithm.egg-info/top_level.txt

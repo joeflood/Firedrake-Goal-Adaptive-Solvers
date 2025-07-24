@@ -102,12 +102,8 @@ Rfacet = Rhat/cones
 # 8. Compute error indicators eta_T 
 DG0 = FunctionSpace(mesh, "DG", degree=0)
 test = TestFunction(DG0)
-#eta = assemble(inner(test*Rcell, zerr)*dx +  avg(inner(test*Rfacet,zerr))*dS + inner(test*Rfacet,zerr)*ds)
+eta = assemble(inner(test*Rcell, zerr)*dx +  avg(inner(test*Rfacet,zerr))*dS + inner(test*Rfacet,zerr)*ds)
 
-eta = Function(DG0)
-G = - inner(eta, test) + inner(test*Rcell, zerr)*dx +  avg(inner(test*Rfacet,zerr))*dS + inner(test*Rfacet,zerr)*ds
-sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
-solve(G == 0, eta, solver_parameters=sp)
 
 with eta.dat.vec as evec:
     evec.abs()

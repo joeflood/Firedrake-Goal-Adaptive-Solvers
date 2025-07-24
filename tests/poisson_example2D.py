@@ -70,11 +70,11 @@ def build_primal_problem(mesh): # Define PDE problem & Goal Functional
     bcs = [DirichletBC(V, u_exact, labels['dirichletbcs'])]
     
     J = dot(grad(u), n)*ds_goal
-    data = dict(V=V, u=u, v=v, u_exact=u_exact, f=f, n=n, J_form=J, bcs=bcs, F=F)
+    data = dict(V=V, u=u, v=v, u_exact=u_exact, J_form=J, bcs=bcs, F=F)
     return data
 
 # From here we repeat
-for it in range(max_iterations):    
+for it in range(max_iterations):   yet
     print(f"Solving on level {it}")
     VTKFile(f"output/mesh{it}.pvd").write(mesh)
     
