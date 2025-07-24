@@ -53,7 +53,7 @@ class SolverCtx:
             "pc_star_mat_ordering_type": "metisnd",
             "pc_star_sub_sub_pc_type": "cholesky",
             }
-    residual_sp = {"snes_type": "ksponly",
+    sp_residual = {"snes_type": "ksponly",
             "ksp_type": "preonly",
             "pc_type": "hypre",
             "pc_hypre_type": "pilut"}

@@ -1,27 +1,28 @@
 from firedrake import *
 from netgen.occ import *
 import sys
+print("Interpreter:", sys.executable)
 from algorithm import *
 
 # Define initial mesh ---------------------
 initial_mesh_size = 0.2
 
-box1 = WorkPlane().MoveTo(-1, 0).Rectangle(1, 1).Face()
-box2 = WorkPlane().MoveTo(0, 0).Rectangle(1, 1).Face()
-box3 = WorkPlane().MoveTo(0, -1).Rectangle(1, 1).Face()
-
-# Now they are geometric shapes you can combine
+# Initial mesh
+box1 = Box(Pnt(-1,0,-1), Pnt(0,1,0))
+box2 = Box(Pnt(0,0,-1), Pnt(1,1,0))
+box3 = Box(Pnt(0,-1,-1), Pnt(1,0,0))
 shape = box1 + box2 + box3
 
-for f in shape.edges: # Assign face labels
+for f in shape.faces: # Assign face labels
     if f.center.x == -1:
         f.name = "goal_face"
     if f.center.x == 1 or f.center.y == 1:
         f.name = "dirichletbcs"
 
-geo = OCCGeometry(shape, dim = 2)
+geo = OCCGeometry(shape)
 ngmesh = geo.GenerateMesh(maxh=initial_mesh_size)
 mesh = Mesh(ngmesh)
+VTKFile("adaptivemesh_unrefined.pvd").write(mesh)
 
 meshctx = MeshCtx(mesh)
 
@@ -33,9 +34,9 @@ solver_parameters = {
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
     "dorfler_alpha": 0.5,
-    "goal_tolerance": 0.00001,
+    "goal_tolerance": 0.001,
     "max_iterations": 30,
-    "output_dir": "../output/poisson2d"
+    "output_dir": "../output/poisson3d"
 }
 
 solverctx = SolverCtx(solver_parameters)
@@ -46,10 +47,9 @@ def define_problem(meshctx: MeshCtx, solverctx: SolverCtx):
     V = FunctionSpace(mesh, "CG", solverctx.degree, variant="integral") # Template function space used to define the PDE
     u = Function(V, name="Solution")
     v = TestFunction(V)
-    coords = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
-    x, y = coords[0], coords[1]
+    (x, y, z) = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
     u_exact = (x-1)*(y-1)**2
-    G = as_vector(((y-1)**2, 2*(x-1)*(y-1)))
+    G = as_vector(((y-1)**2, 2*(x-1)*(y-1), 0.0))
     g = dot(G,meshctx.n)
     f = -div(grad(u_exact))
 

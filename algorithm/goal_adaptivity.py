@@ -43,7 +43,7 @@ class GoalAdaption:
         p = self.problemctx
 
         ndofs = p.V.dim()
-        print("N:" , ndofs)
+        print("Primal dofs:" , ndofs)
         self.N_vec.append(ndofs)
 
         print("Solving primal ...")
@@ -120,8 +120,10 @@ class GoalAdaption:
         Lc = self.residual(p.F, bubbles*vc)
 
         Rcell = Function(DG, name="Rcell") # Rcell polynomial
+        ndofs = DG.dim()
+        print("Rhat dofs:" , ndofs)
         print("Computing Rcells ...")
-        solve(ac == Lc, Rcell) # solve for Rcell polynonmial
+        solve(ac == Lc, Rcell, solver_parameters=s.sp_residual) # solve for Rcell polynonmial
 
         def both(u):
             return u("+") + u("-")
@@ -138,8 +140,10 @@ class GoalAdaption:
         af = both(inner(Qtrial/cones, Qtest))*dS + inner(Qtrial/cones, Qtest)*ds
 
         Rhat = Function(Q)
+        ndofs = Q.dim()
+        print("Rhat dofs:" , ndofs)
         print("Computing Rhats ...")
-        solve(af == Lf, Rhat)
+        solve(af == Lf, Rhat, solver_parameters=s.sp_residual)
 
         print("Computing Rfacets ...")
         Rfacet = Rhat/cones
@@ -203,8 +207,8 @@ class GoalAdaption:
 
     def write_data(self):
         # Write to file
-        rows = list(zip(self.N_vec, self.eta_vec, self.etah_vec, self.etaTsum_vec))
-        headers = ("N", "eta", "eta_h", "sum_eta_T")
+        rows = list(zip(self.N_vec, self.eta_vec, self.etah_vec, self.etaTsum_vec, self.eff1_vec, self.eff2_vec))
+        headers = ("N", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
         with open(self.output_dir / "results.csv", "w", newline="") as file:
             w = csv.writer(file)
             w.writerow(headers)
