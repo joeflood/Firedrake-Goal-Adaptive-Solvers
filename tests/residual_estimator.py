@@ -13,6 +13,7 @@ dim = mesh.topological_dimension() # Dimension of the mesh
 V = FunctionSpace(mesh, "CG", degree, variant=variant)
 # PDE residual
 uh = Function(V, name="solution")
+du = TrialFunction(V)
 v = TestFunction(V)
 
 # MMS Method of Manufactured Solution
@@ -82,7 +83,7 @@ u_dual = TrialFunction(dual_space) # Symbolic trial function to differentiate F
 v_dual = TestFunction(dual_space) # Dual test function
 z = Function(dual_space) # Dual soluton
 
-G = action(adjoint(derivative(F, uh, u_dual)), z) - derivative(J, uh, v_dual)
+G = action(adjoint(derivative(F, uh, du)), z) - derivative(J, uh, v_dual)
 G = replace(G, {v: v_dual})
 bcs_dual  = [bc.reconstruct(V=dual_space, g=0) for bc in bcs]
 
