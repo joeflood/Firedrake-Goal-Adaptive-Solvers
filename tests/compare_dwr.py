@@ -135,11 +135,20 @@ ac = inner(uc, bubbles*vc)*dx
 Lc = residual(F, bubbles*vc)
 
 Rcell = Function(DG, name="Rcell") # Rcell polynomial
-residual_sp = {"snes_type": "ksponly",
+cell_sp     = {"mat_type": "matfree",
+               "snes_type": "ksponly",
                "ksp_type": "preonly",
-               "pc_type": "hypre",
-               "pc_hypre_type": "pilut"}
-solve(ac == Lc, Rcell, solver_parameters=residual_sp) # solve for Rcell polynonmial
+               "pc_type": "python",
+               "pc_python_type": "firedrake.PatchPC",
+               "patch_pc_patch_save_operators": True,
+               "patch_pc_patch_construct_type": "vanka",
+               "patch_pc_patch_construct_codim": 0,
+               "patch_pc_patch_sub_mat_type": "seqdense",
+               "patch_sub_ksp_type": "preonly",
+               "patch_sub_pc_type": "lu",
+              }
+
+solve(ac == Lc, Rcell, solver_parameters=cell_sp) # solve for Rcell polynonmial
 
 def both(u):
     return u("+") + u("-")
@@ -156,7 +165,11 @@ Lf = residual(F, q) - inner(Rcell, q)*dx
 af = both(inner(p/cones, q))*dS + inner(p/cones, q)*ds
 
 Rhat = Function(Q)
-solve(af == Lf, Rhat, solver_parameters=residual_sp)
+facet_sp    = {"snes_type": "ksponly",
+               "ksp_type": "preonly",
+               "pc_type": "hypre",
+               "pc_hypre_type": "pilut"}
+solve(af == Lf, Rhat, solver_parameters=facet_sp)
 Rfacet = Rhat/cones
 
 # Extra code - another way of accomplishing the same outcome?
