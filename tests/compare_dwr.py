@@ -165,9 +165,11 @@ Lf = residual(F, q) - inner(Rcell, q)*dx
 af = both(inner(p/cones, q))*dS + inner(p/cones, q)*ds
 
 Rhat = Function(Q)
-facet_sp    = {"snes_type": "ksponly",
-               "ksp_type": "preonly",
-               "pc_type": "hypre",
+facet_sp    = {"mat_type": "matfree",
+               "snes_type": "ksponly",
+               "ksp_type": "cg",
+               "ksp_monitor_true_residual": None,
+               "pc_type": "jacobi",
                "pc_hypre_type": "pilut"}
 solve(af == Lf, Rhat, solver_parameters=facet_sp)
 Rfacet = Rhat/cones
