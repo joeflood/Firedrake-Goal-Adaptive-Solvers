@@ -88,18 +88,18 @@ file = VTKFile("output/stress.pvd")
 file.write(sigma, u, gamma)
 
 # Solve the dual problem (MANUALLY)
-S_dual = VectorFunctionSpace(mesh, "BDM", degree+1)
-V_dual = VectorFunctionSpace(mesh, "DG", degree)
-Q_dual = FunctionSpace(mesh, "CG", degree+1)
+element = T.ufl_element()
+degree = element.degree()
+dual_degree = degree + 1
+dual_element = PMGPC.reconstruct_degree(element, dual_degree)
+T_dual = FunctionSpace(mesh, dual_element)
 
-T_dual = S_dual * V_dual * Q_dual
 z = Function(T_dual)
 z_trial = TrialFunction(T_dual)
 z_test = TestFunction(T_dual)
 
 G = action(adjoint(derivative(F, t, z_trial)), z) - derivative(M, t, z_test)
-bcs_dual  = [bc.reconstruct(V=T_dual, g=0) for bc in bcs]
-
+bcs_dual  = [bc.reconstruct(V=T_dual, indices=bc._indices, g=0) for bc in bcs]
 solve(G == 0, z, bcs_dual) # Obtain z
 
 def residual(F, test):
@@ -116,7 +116,7 @@ z_err = z - z_lo
 
 # Automatic computation
 cell = mesh.ufl_cell()  #Returns the cell from the mesh
-dim = mesh.topological_dimension() # Dimension of the mesh 
+dim = mesh.topological_dimension() # Dimension of the mesh
 variant = "integral" # Finite element type
 residual_degree = degree
 residual_sp = {"snes_type": "ksponly",
@@ -158,7 +158,7 @@ print("Computing Rhats ...")
 solve(af == Lf, Rhat, solver_parameters=residual_sp)
 Rfacet = Rhat/cones
 
-# 8. Compute error indicators eta_T 
+# 8. Compute error indicators eta_T
 DG0 = FunctionSpace(mesh, "DG", degree=0)
 test = TestFunction(DG0)
 vol = CellVolume(mesh)
@@ -168,8 +168,8 @@ etaT = Function(DG0)
 
 G = (
     inner(etaT / vol, test)*dx
-    - inner(inner(Rcell, z_err), test)*dx + 
-    - inner(avg(inner(Rfacet,z_err)), both(test))*dS + 
+    - inner(inner(Rcell, z_err), test)*dx +
+    - inner(avg(inner(Rfacet,z_err)), both(test))*dS +
     - inner(inner(Rfacet,z_err), test)*ds
     )
 
@@ -178,9 +178,9 @@ sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
 solve(G == 0, etaT, solver_parameters=sp)
 
 with etaT.dat.vec as evec:
-        evec.abs()    
+        evec.abs()
         etaT_array = evec.getArray()
-    
+
 etaT_total = np.sum(etaT_array)
 print(f"sum_T(eta_T): {etaT_total}")
 
