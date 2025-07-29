@@ -44,11 +44,15 @@ def skw(sigma):
 
 x, y = SpatialCoordinate(mesh)
 
-uexact = as_vector([x*y*sin(pi*y), 0])
-sigma_exact = Ainv(sym(grad(uexact)))
+u_exact = as_vector([x*y*sin(pi*y), 0])
+sigma_exact = Ainv(sym(grad(u_exact)))
+gamma_exact = 0.5*(grad(u_exact)[0,1] - grad(u_exact)[1,0])
+
+exact_sol = [u_exact, sigma_exact, gamma_exact]
+
 g = div(sigma_exact)
 
-u0 = uexact
+u0 = u_exact
 n = FacetNormal(mesh)
 
 # F =〈Aσ, τ 〉 + 〈div σ, v〉 + 〈u, div τ 〉 + 〈σ, η〉 + 〈γ, τ〉 -〈g, v〉 - 〈u0, τ · n〉∂Ω
@@ -87,7 +91,7 @@ print("error skw(sigma)", norm(skw(sigma)))
 file = VTKFile("output/stress.pvd")
 file.write(sigma, u, gamma)
 
-# Solve the dual problem (MANUALLY)
+# Solve the dual problem (Automatic)
 element = T.ufl_element()
 degree = element.degree()
 dual_degree = degree + 1

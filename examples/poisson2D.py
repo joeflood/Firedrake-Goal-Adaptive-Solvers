@@ -33,7 +33,7 @@ solver_parameters = {
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
     "dorfler_alpha": 0.5,
-    "goal_tolerance": 0.00001,
+    "goal_tolerance": 0.000001,
     "max_iterations": 30,
     "output_dir": "../output/poisson2d"
 }
@@ -58,12 +58,12 @@ def define_problem(meshctx: MeshCtx, solverctx: SolverCtx):
     dxm     = Measure("dx", domain=mesh)
     dsm     = Measure("ds", domain=mesh)
 
-    F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm - g*v*dsm
-    bcs = [DirichletBC(V, u_exact, labels['dirichletbcs'])]
+    F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm
+    bcs = [DirichletBC(V, u_exact, "on_boundary")]
 
     J = dot(grad(u), meshctx.n)*ds_goal
 
-    return ProblemCtx(V, u, v, u_exact, F, bcs, J)
+    return ProblemCtx(V, u, v, u_exact, F, bcs, J, g ,f)
 
 adaptive_problem = GoalAdaption(meshctx, define_problem, solverctx)
 

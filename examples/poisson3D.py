@@ -16,8 +16,10 @@ shape = box1 + box2 + box3
 for f in shape.faces: # Assign face labels
     if f.center.x == -1:
         f.name = "goal_face"
-    if f.center.x == 1 or f.center.y == 1:
+    elif f.center.x == 1 or f.center.y == 1:
         f.name = "dirichletbcs"
+    else: 
+        f.name = "neumannbcs"  
 
 geo = OCCGeometry(shape)
 ngmesh = geo.GenerateMesh(maxh=initial_mesh_size)
@@ -34,7 +36,7 @@ solver_parameters = {
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
     "dorfler_alpha": 0.5,
-    "goal_tolerance": 0.001,
+    "goal_tolerance": 0.0001,
     "max_iterations": 30,
     "output_dir": "../output/poisson3d"
 }
@@ -52,18 +54,18 @@ def define_problem(meshctx: MeshCtx, solverctx: SolverCtx):
     G = as_vector(((y-1)**2, 2*(x-1)*(y-1), 0.0))
     g = dot(G,meshctx.n)
     f = -div(grad(u_exact))
-
+    
     labels = meshctx.labels
     ds_goal = Measure("ds", domain=mesh, subdomain_id=labels['goal_face'])
     dxm     = Measure("dx", domain=mesh)
-    dsm     = Measure("ds", domain=mesh)
+    ds_neumann     = Measure("ds", domain=mesh, subdomain_id=labels['neumannbcs']+labels['goal_face'])
 
-    F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm - g*v*dsm
+    F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm - g*v*ds_neumann
     bcs = [DirichletBC(V, u_exact, labels['dirichletbcs'])]
 
-    J = dot(grad(u), meshctx.n)*ds_goal
-
-    return ProblemCtx(V, u, v, u_exact, F, bcs, J)
+    J = u*ds_goal
+    
+    return ProblemCtx(space=V, trial=u, test=v, residual=F, bcs=bcs, goal=J)
 
 adaptive_problem = GoalAdaption(meshctx, define_problem, solverctx)
 

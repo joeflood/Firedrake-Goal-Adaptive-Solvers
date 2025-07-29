@@ -71,7 +71,7 @@ sp_star = {"snes_type": "ksponly",
           "pc_star_sub_sub_pc_type": "cholesky",
           }
 
-solve(G == 0, z, bcs_dual, solver_parameters=sp_star) # Obtain z
+solve(G == 0, z, bcs_dual, solver_parameters=sp_chol) # Obtain z
 
 Juh = assemble(J)
 Ju = assemble(replace(J, {u: u_exact}))
@@ -99,7 +99,7 @@ solve(Rho == 0, rho, solver_parameters=dgsp)
 
 z_lo = Function(V, name="LowOrderDualSolution")
 z_lo.interpolate(z)
-z_err = z
+z_err = z - z_lo
 Omega = (
           inner(omega / vol, w)*dx
         - inner(sqrt(inner(z_err, z_err)), w)*dx
@@ -194,7 +194,13 @@ print("‖Rfacet‖_L2(interior) =", L2_interior)
 DG0 = FunctionSpace(mesh, "DG", degree=0)
 test = TestFunction(DG0)
 
-eta_T = assemble(inner(test*Rcell, z_err)*dx +  avg(inner(test*Rfacet,z_err))*dS + inner(test*Rfacet,z_err)*ds)
+eta_T = assemble(
+    inner(inner(Rcell, z_err), test)*dx + 
+    + inner(avg(inner(Rfacet, z_err)), both(test))*dS + 
+    + inner(inner(Rfacet, z_err), test)*ds
+)
+
+#eta_T = assemble(inner(test*Rcell, z_err)*dx +  avg(inner(test*Rfacet,z_err))*dS + inner(test*Rfacet,z_err)*ds)
 
 # eta_T = Function(DG0)
 # G = (
@@ -202,7 +208,7 @@ eta_T = assemble(inner(test*Rcell, z_err)*dx +  avg(inner(test*Rfacet,z_err))*dS
 #      - inner(inner(Rcell, z_err), test)*dx + 
 #      - inner(avg(inner(Rfacet,z_err)), both(test))*dS + 
 #      - inner(inner(Rfacet,z_err), test)*ds
-#  )
+#     )
 
 # sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
 # solve(G == 0, eta_T, solver_parameters=sp)
@@ -211,23 +217,16 @@ eta_T = assemble(inner(test*Rcell, z_err)*dx +  avg(inner(test*Rfacet,z_err))*dS
 with eta_T.dat.vec as evec:
     evec.abs()
 
-#print("Automatically computed local error estimates:")
-#print(eta_T.dat.data)
-
 total_eta = np.sum(eta_T.dat.data)
 print("Automatic total error estimator:", total_eta)
 
-
-factor = eta_T.dat.data / eta.dat.data
+#factor = eta_T.dat.data / eta.dat.data
 #print("Factor relative to local method:")
 #print(factor)
 
-
 # Exact facet residuals
 eta_manual = Function(DG0)
-
 n = FacetNormal(mesh)
-
 H = (
     inner(eta_manual / vol, test)*dx
      - inner(f + div(grad(u)), z_err * test) * dx
@@ -243,17 +242,11 @@ solve(H == 0, eta_manual, solver_parameters=sp)
 with eta_manual.dat.vec as evec:
     evec.abs()
 
-#print("Manually computed local error estimates:")
-
 #print(eta_manual.dat.data)
 manual_total = np.sum(eta_manual.dat.data)
 print("Manual total error estimator: ", manual_total)
 
-
 difference = (eta_manual.dat.data - eta_T.dat.data)
-#print("Difference:")
-#print(difference)
-
 
 total_difference = np.sum(difference)
 print("Total difference:", total_difference)

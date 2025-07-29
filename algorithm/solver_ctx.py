@@ -17,6 +17,11 @@ class SolverCtx:
         self.dual_solve_degree = eval(config.get("dual_solve_degree", "degree + 1"), {}, context)
         self.residual_degree = eval(config.get("residual_degree", "degree"), {}, context)
 
+        # (Optional) Parameters for GoalAdaptionStabilized 
+        self.parameter_init = config.get("parameter_init", 1)
+        self.parameter_final = config.get("parameter_final", 1)
+        self.parameter_iterations = config.get("parameter_iterations", 1)
+
     # Solver parameters
     sp_chol = {"pc_type": "cholesky",
             "pc_factor_mat_solver_type": "mumps"}
@@ -56,4 +61,33 @@ class SolverCtx:
     sp_residual = {"snes_type": "ksponly",
             "ksp_type": "preonly",
             "pc_type": "hypre",
-            "pc_hypre_type": "pilut"}
+            "pc_hypre_type": "pilut"} # Maybe now defunct
+    sp_cell     = {"mat_type": "matfree",
+               "snes_type": "ksponly",
+               "ksp_type": "preonly",
+               "pc_type": "python",
+               "pc_python_type": "firedrake.PatchPC",
+               "patch_pc_patch_save_operators": True,
+               "patch_pc_patch_construct_type": "vanka",
+               "patch_pc_patch_construct_codim": 0,
+               "patch_pc_patch_sub_mat_type": "seqdense",
+               "patch_sub_ksp_type": "preonly",
+               "patch_sub_pc_type": "lu",
+              }
+    sp_cell2   = {"mat_type": "matfree",
+               "snes_type": "ksponly",
+               "ksp_type": "cg",
+               "ksp_monitor_true_residual": None,
+               "pc_type": "jacobi",
+               "pc_hypre_type": "pilut"}
+    sp_facet1    = {"mat_type": "matfree",
+               "snes_type": "ksponly",
+               "ksp_type": "cg",
+               "ksp_monitor_true_residual": None,
+               "pc_type": "jacobi",
+               "pc_hypre_type": "pilut"}
+    sp_facet2    = {"snes_type": "ksponly",
+               "ksp_type": "preonly",
+               "pc_type": "hypre",
+               "pc_hypre_type": "pilut"}
+    sp_etaT = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
