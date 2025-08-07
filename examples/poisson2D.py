@@ -13,15 +13,16 @@ box3 = WorkPlane().MoveTo(0, -1).Rectangle(1, 1).Face()
 # Now they are geometric shapes you can combine
 shape = box1 + box2 + box3
 
+tol = 0.00001
 for f in shape.edges: # Assign face labels
-    if f.center.x == -1:
+    if abs(f.center.x + 1) < tol:
         f.name = "goal_face"
-    if f.center.x == 1 or f.center.y == 1:
-        f.name = "dirichletbcs"
 
 geo = OCCGeometry(shape, dim = 2)
 ngmesh = geo.GenerateMesh(maxh=initial_mesh_size)
 mesh = Mesh(ngmesh)
+
+mesh = Mesh(unit_square.GenerateMesh(maxh=initial_mesh_size))
 
 meshctx = MeshCtx(mesh)
 
@@ -35,7 +36,8 @@ solver_parameters = {
     "dorfler_alpha": 0.5,
     "goal_tolerance": 0.000001,
     "max_iterations": 30,
-    "output_dir": "../output/poisson2d"
+    "output_dir": "output/poisson2d",
+    "write_at_iteration": True
 }
 
 solverctx = SolverCtx(solver_parameters)
@@ -46,24 +48,21 @@ def define_problem(meshctx: MeshCtx, solverctx: SolverCtx):
     V = FunctionSpace(mesh, "CG", solverctx.degree, variant="integral") # Template function space used to define the PDE
     u = Function(V, name="Solution")
     v = TestFunction(V)
-    coords = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
-    x, y = coords[0], coords[1]
+    (x, y) = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
     u_exact = (x-1)*(y-1)**2
-    G = as_vector(((y-1)**2, 2*(x-1)*(y-1)))
-    g = dot(G,meshctx.n)
     f = -div(grad(u_exact))
+    g = dot(grad(u_exact), meshctx.n) 
 
     labels = meshctx.labels
-    ds_goal = Measure("ds", domain=mesh, subdomain_id=labels['goal_face'])
+    #ds_goal = Measure("ds", domain=mesh, subdomain_id=labels['goal_face'])
     dxm     = Measure("dx", domain=mesh)
-    dsm     = Measure("ds", domain=mesh)
 
     F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm
     bcs = [DirichletBC(V, u_exact, "on_boundary")]
 
-    J = dot(grad(u), meshctx.n)*ds_goal
+    J = dot(grad(u), meshctx.n) * ds
 
-    return ProblemCtx(V, u, v, u_exact, F, bcs, J, g ,f)
+    return ProblemCtx(space=V, trial=u, test=v, exact=u_exact, residual=F, bcs=bcs, goal=J, f=f, g=g)
 
 adaptive_problem = GoalAdaption(meshctx, define_problem, solverctx)
 

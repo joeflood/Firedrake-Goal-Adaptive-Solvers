@@ -8,23 +8,45 @@ from typing import Callable, Any
 from pathlib import Path
 import numpy as np
 from tsfc.ufl_utils import extract_firedrake_constants
+import os
+from functools import singledispatch
+from firedrake.mg.ufl_utils import coarsen
+from adaptive_mg.adaptive import AdaptiveMeshHierarchy
+from adaptive_mg.adaptive_transfer_manager import AdaptiveTransferManager
 
-class GoalAdaption:
-    # Stores:
-    # problemctx <- Changes
-    # meshctx   <- Changes
-    # solverctx <- Unchanged
+class GoalAdaptiveNonlinearVariationalSolver():
+    '''
+    Solves a goal adaption problem.
+    Stores:
+    problemctx <- Changes
+    meshctx   <- Changes
+    solverctx <- Unchanged
 
-    # State: (For each iteration)
-    # u
-    # z
-    # z_err
+    State: (For each iteration)
+    u
+    z
+    z_err
+    u_err ? Soon - for dual sol.            
+    '''
 
-    def __init__(self, meshctx: MeshCtx, problem_fn: Callable[[MeshCtx, SolverCtx], ProblemCtx], solverctx: SolverCtx):
-        self.problemfn = problem_fn
-        # Obtain initial mesh and solver ctx
-        self.meshctx = meshctx
-        self.solverctx = solverctx
+    def __init__(self, problem: NonlinearVariationalProblem, goal_functional, tolerance: float,  solver_parameters: dict, exact_solution = None, exact_goal = None):
+        self.problem = problem
+        self.solver_parameters = solver_parameters
+        self.J = goal_functional
+        self.tolerance = tolerance
+
+        self.V = problem.u.function_space()
+        self.u = problem.u
+        self.bcs = problem.bcs
+        self.F = problem.F
+        self.u_exact = exact_solution
+        self.goal_exact = exact_goal
+        # We also need other things
+        self.element = self.V.ufl_element()
+        self.test = TestFunction(self.V)
+        mesh = self.V.mesh()
+        self.meshctx = MeshCtx(mesh) # To store mesh and mesh data (Maybe remove?)
+        self.solverctx = SolverCtx(solver_parameters) # To store solver data (Maybe remove?)
 
         self.output_dir = Path(self.solverctx.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)  # ensures folder exists
@@ -38,29 +60,19 @@ class GoalAdaption:
         self.eff2_vec = []
         self.eff3_vec = []
 
-        self.problemctx = self.problemfn(self.meshctx, self.solverctx)
-        self.u = self.problemctx.u
-
-    def build_problem(self):
-        self.problemctx = self.problemfn(self.meshctx, self.solverctx)
-        self.u = self.problemctx.u
-
     def solve_primal(self):
-        p = self.problemctx
-
-        ndofs = p.V.dim()
+        ndofs = self.V.dim()
         print("Primal dofs:" , ndofs)
         self.N_vec.append(ndofs)
 
         print("Solving primal ...")
-        solve(p.F == 0, self.u, bcs=p.bcs, solver_parameters={"snes_monitor": None})
+        NonlinearVariationalSolver(self.problem).solve()
 
     def solve_dual(self):
         m = self.meshctx
         s = self.solverctx
-        p = self.problemctx
 
-        element = p.V.ufl_element()
+        element = self.V.ufl_element()
         degree = element.degree()
         dual_degree = degree + 1
         dual_element = PMGPC.reconstruct_degree(element, dual_degree)
@@ -72,19 +84,19 @@ class GoalAdaption:
         print("Dual problem dofs:", ndofs_dual)
         self.Ndual_vec.append(ndofs_dual)    
 
-        G = ( action(adjoint(derivative(p.F, p.u, TrialFunction(Vdual))), self.z) 
-             - derivative(p.J, p.u, vtest) )
+        G = ( action(adjoint(derivative(self.F, self.u, TrialFunction(Vdual))), self.z) 
+             - derivative(self.J, self.u, vtest) )
 
-        # Needs fixing      
-        #eta_h_dual = abs(assemble(action(G, self.u)))
+        # Dual ERROR
+        #eta_h_dual = abs(assemble(action(G, self.u_err)))
         #print("Etah dual = ", eta_h_dual)
         
-        bcs_dual  = [bc.reconstruct(V=Vdual, indices=bc._indices, g=0) for bc in p.bcs]
+        bcs_dual  = [bc.reconstruct(V=Vdual, indices=bc._indices, g=0) for bc in self.bcs]
         
         if s.dual_solve_method == "high_order":
             print("Solving dual ...")
             solve(G == 0, self.z, bcs_dual, solver_parameters=s.sp_chol) # Obtain z
-            z_lo = Function(p.V, name="LowOrderDualSolution")
+            z_lo = Function(self.V, name="LowOrderDualSolution")
             z_lo.interpolate(self.z)
             self.z_err = self.z - z_lo
     
@@ -97,27 +109,25 @@ class GoalAdaption:
             print("ERROR: Unknown dual solve method.")
 
     def compute_etah(self):
-        p = self.problemctx
-
         # Compute error estimate F(z)
-        self.eta_h = abs(assemble(self.residual(p.F, self.z)))
+        self.eta_h = abs(assemble(self.residual(self.F, self.z)))
         # Add in average with adjoint residual G(u) for nonlinear problems
 
         # Append to state vectors for later
         self.etah_vec.append(self.eta_h)
 
         # Compute true error in J(uh)
-        Juh = assemble(p.J)
+        Juh = assemble(self.J)
         print(f"J(uh): {Juh}")
 
-        if p.u_exact is not None:
+        if self.u_exact is not None:
             def as_mixed(exprs):
                 return as_vector([e[idx] for e in exprs for idx in np.ndindex(e.ufl_shape)])
 
-            if type(p.u_exact) == list or type(p.u_exact) == tuple:
-                Ju = assemble(replace(p.J, {p.u: as_mixed(p.u_exact)}))
+            if type(self.u_exact) == list or type(self.u_exact) == tuple:
+                Ju = assemble(replace(self.J, {self.u: as_mixed(self.u_exact)}))
             else:
-                Ju = assemble(replace(p.J, {p.u: p.u_exact}))
+                Ju = assemble(replace(self.J, {self.u: self.u_exact}))
             
             self.eta = abs(Juh - Ju)
             self.eta_vec.append(self.eta)
@@ -126,8 +136,8 @@ class GoalAdaption:
             print(f"J(u): {Ju}")
             print(f"eta = {self.eta}")
 
-        if p.goal_exact is not None:
-            Ju = p.goal_exact
+        if self.goal_exact is not None:
+            Ju = self.goal_exact
             self.eta = abs(Juh - Ju)
             self.eta_vec.append(self.eta)
 
@@ -141,7 +151,6 @@ class GoalAdaption:
         # 7. Compute cell and facet residuals R_T, R_\partialT
         m = self.meshctx
         s = self.solverctx
-        p = self.problemctx
 
         variant = "integral" # Finite element type 
 
@@ -150,14 +159,16 @@ class GoalAdaption:
         bubbles = Function(B).assign(1) # Bubbles
 
         # Discontinuous function space of Rcell polynomials
-        if p.V.value_shape == ():
+        if self.V.value_shape == ():
             DG = FunctionSpace(m.mesh, "DG", s.residual_degree, variant=variant)
         else:
-            DG = TensorFunctionSpace(m.mesh, "DG", s.residual_degree, variant=variant, shape=p.V.value_shape)
+            DG = TensorFunctionSpace(m.mesh, "DG", s.residual_degree, variant=variant, shape=self.V.value_shape)
+
+        print("Value shape: ", self.V.value_shape)
         uc = TrialFunction(DG)
         vc = TestFunction(DG)
         ac = inner(uc, bubbles*vc)*dx
-        Lc = self.residual(p.F, bubbles*vc)
+        Lc = self.residual(self.F, bubbles*vc)
 
         Rcell = Function(DG, name="Rcell") # Rcell polynomial
         ndofs = DG.dim()
@@ -176,13 +187,13 @@ class GoalAdaption:
         cones = Function(FB).assign(1) # Cones
 
         el = BrokenElement(FiniteElement("FB", cell=m.cell, degree=s.residual_degree+m.dim, variant=variant))
-        if p.V.value_shape == ():
+        if self.V.value_shape == ():
             Q = FunctionSpace(m.mesh, el)
         else: 
-            Q = TensorFunctionSpace(m.mesh, el, shape=p.V.value_shape)
+            Q = TensorFunctionSpace(m.mesh, el, shape=self.V.value_shape)
         Qtest = TestFunction(Q)
         Qtrial = TrialFunction(Q)
-        Lf = self.residual(p.F, Qtest) - inner(Rcell, Qtest)*dx
+        Lf = self.residual(self.F, Qtest) - inner(Rcell, Qtest)*dx
         af = both(inner(Qtrial/cones, Qtest))*dS + inner(Qtrial/cones, Qtest)*ds
 
         Rhat = Function(Q)
@@ -204,27 +215,25 @@ class GoalAdaption:
         )
         return
 
-    # def manual_error_indicators(self): # Poisson ONLY!!!!!!!!!!
-    #     m = self.meshctx
-    #     s = self.solverctx
-    #     p = self.problemctx
+    def manual_error_indicators(self): # Poisson ONLY!!!!!!!!!!
+        m = self.meshctx
+        s = self.solverctx
 
-    #     DG0 = FunctionSpace(m.mesh, "DG", degree=0)
-    #     test = TestFunction(DG0)
+        DG0 = FunctionSpace(m.mesh, "DG", degree=0)
+        test = TestFunction(DG0)
 
-    #     def both(u):
-    #         return u("+") + u("-")
+        def both(u):
+            return u("+") + u("-")
         
-    #     print("Computing eta_T indicators ...")
-    #     self.etaT = assemble(
-    #         inner(p.f + div(grad(self.u)), self.z_err * test) * dx +
-    #         inner(0.5*jump(-grad(self.u), m.n), self.z_err * both(test)) * dS +
-    #         inner(dot(-grad(self.u), m.n) + p.g, self.z_err * test) * p.ds_neumann
-    #     )
+        print("Computing eta_T indicators ...")
+
+        self.etaT = assemble(
+            inner(self.f + div(grad(self.u)), self.z_err * test) * dx +
+            inner(0.5*jump(-grad(self.u), m.n), self.z_err * both(test)) * dS +
+            inner(dot(-grad(self.u), m.n), self.z_err * test) * ds
+        )
 
     def compute_efficiency(self):
-        p = self.problemctx
-
         with self.etaT.dat.vec as evec:
             evec.abs()    
             self.etaT_array = evec.getArray()
@@ -233,7 +242,7 @@ class GoalAdaption:
         self.etaTsum_vec.append(self.etaT_total)
         print(f"sum_T(eta_T): {self.etaT_total}")
 
-        if p.u_exact is not None:
+        if self.u_exact is not None:
             # Compute efficiency indices
             self.eff1 = self.eta_h/self.eta
             self.eff2 = self.etaT_total/self.eta
@@ -249,7 +258,7 @@ class GoalAdaption:
     def mark_and_refine(self):
         m = self.meshctx
         s = self.solverctx
-        p = self.problemctx        
+
         # 9. Mark cells for refinement (Dorfler marking)
         print("Marking cells for refinement ...")
         sorted_indices = np.argsort(-self.etaT_array)
@@ -267,16 +276,57 @@ class GoalAdaption:
             marr[marked_cells] = 1
 
         print("Refining mesh ...")
-        m.update_mesh(m.mesh.refine_marked_elements(markers))
+        new_mesh = m.mesh.refine_marked_elements(markers)
+        amh = AdaptiveMeshHierarchy([m.mesh])
+        atm = AdaptiveTransferManager()
+        amh.add_mesh(new_mesh)
+        coef_map = {}
+        self.problem = coarsen(self.problem, coarsen, coefficient_mapping=coef_map)
+        self.J = coarsen(self.J, coarsen, coefficient_mapping=coef_map)
+        self.F = self.problem.F
+        self.u = self.problem.u
+        self.bcs = self.problem.bcs
+        self.V = self.u.function_space()
+        self.problem = NonlinearVariationalProblem(self.F,self.u,self.bcs)
+        self.meshctx.mesh = new_mesh
 
     def write_data(self):
         # Write to file
-        rows = list(zip(self.N_vec, self.eta_vec, self.etah_vec, self.etaTsum_vec, self.eff1_vec, self.eff2_vec))
-        headers = ("N", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
+        rows = list(zip(self.N_vec, self.Ndual_vec, self.eta_vec, self.etah_vec, self.etaTsum_vec, self.eff1_vec, self.eff2_vec))
+        headers = ("N", "Ndual", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
         with open(self.output_dir / "results.csv", "w", newline="") as file:
             w = csv.writer(file)
             w.writerow(headers)
-            w.writerows(rows)   
+            w.writerows(rows)
+            jump
+
+    def append_data(self, it):
+        file_path = self.output_dir / "results.csv"
+        if self.u_exact is not None:
+            headers = ("iteration", "N", "Ndual", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
+            row = (
+                it,
+                self.N_vec[-1], self.Ndual_vec[-1], self.eta_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1], self.eff1_vec[-1], self.eff2_vec[-1]
+            )
+        else:
+            headers = ("iteration", "N", "Ndual", "eta_h", "sum_eta_T")
+            row = (
+                it,
+                self.N_vec[-1], self.Ndual_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1]
+            )
+        
+        file_exists = os.path.exists(file_path)
+
+        if it == 0:
+            with open(file_path, "w", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow(headers)
+                writer.writerow(row)
+        else:
+            with open(file_path, "a", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow(row)
+        
 
     def solve(self):
         m = self.meshctx
@@ -288,10 +338,6 @@ class GoalAdaption:
             print("Writing mesh ...")
             VTKFile(self.output_dir / f"mesh{it}.pvd").write(m.mesh)
 
-            if it != 0:
-                print("Defining problem on new mesh ...")
-                self.build_problem() # Redefine problem on new mesh
-
             self.solve_primal()
             print("Writing primal ...")
             VTKFile(self.output_dir / f"solution_{it}.pvd").write(*self.u.subfunctions)
@@ -299,20 +345,32 @@ class GoalAdaption:
             self.solve_dual()
 
             self.compute_etah()
-            if self.eta_h < s.tolerance:
+            if self.eta_h < self.tolerance:
                 print("Error estimate below tolerance, finished.")
                 break
 
             if it == s.max_iterations -1:
                 print(f"Maximum iteration ({s.max_iterations}) reached. Exiting.")
                 break
+            
+            if s.residual_solve_method == "automatic":
+                self.automatic_error_indicators()
+            elif s.residual_solve_method == "manual":
+                self.manual_error_indicators()
+            else:
+                print("Unknown residual solve method. Exiting.")
+                break
 
-            self.automatic_error_indicators()
             self.compute_efficiency()
             self.mark_and_refine()
 
-        print("Writing data ...")
-        self.write_data()
+            if s.write_at_iteration == True:
+                print("Writing data ...")
+                self.append_data(it)
+
+        if s.write_at_iteration == False:
+            print("Writing data ...")
+            self.write_data()
 
     # Utility functions
     def residual(self, F, test): # Residual helper function
@@ -320,11 +378,10 @@ class GoalAdaption:
         return replace(F, {v: test})
     
 
-class GoalAdaptionStabilized(GoalAdaption):
+class GAParameterContinuation(GoalAdaptiveNonlinearVariationalSolver):
     def solve(self):
         m = self.meshctx
         s = self.solverctx
-        p = self.problemctx
 
         for it in range(s.max_iterations):
             print(f"Solving on level {it}")
@@ -339,14 +396,14 @@ class GoalAdaptionStabilized(GoalAdaption):
                 nu_init = s.parameter_init
                 iterations = s.parameter_iterations
                 nu_final = s.parameter_final
-                nu = p.parameter
+                nu = self.parameter
                 nu_vals = np.logspace(np.log10(nu_init), np.log10(nu_final), iterations)
                 
                 for nu_val in nu_vals:
                     print(f"Primal iteration {nu_val}")
 
                     nu.assign(nu_val)
-                    nu_in_form = extract_firedrake_constants(p.F)
+                    nu_in_form = extract_firedrake_constants(self.F)
                     print("Nu in F: ", nu_in_form)
                     self.solve_primal()
             else:
@@ -358,7 +415,7 @@ class GoalAdaptionStabilized(GoalAdaption):
             self.solve_dual()
 
             self.compute_etah()
-            if self.eta_h < s.tolerance:
+            if self.eta_h < self.tolerance:
                 print("Error estimate below tolerance, finished.")
                 break
 
@@ -370,5 +427,6 @@ class GoalAdaptionStabilized(GoalAdaption):
             self.compute_efficiency()
             self.mark_and_refine()
 
-        print("Writing data ...")
-        self.write_data()
+            if s.write_at_iteration == True:
+                print("Writing data ...")
+                self.append_data(it)

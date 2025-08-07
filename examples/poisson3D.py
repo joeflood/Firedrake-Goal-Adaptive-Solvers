@@ -38,7 +38,8 @@ solver_parameters = {
     "dorfler_alpha": 0.5,
     "goal_tolerance": 0.0001,
     "max_iterations": 30,
-    "output_dir": "../output/poisson3d"
+    "output_dir": "output/poisson3d",
+    "write_at_iteration": True
 }
 
 solverctx = SolverCtx(solver_parameters)
@@ -59,13 +60,14 @@ def define_problem(meshctx: MeshCtx, solverctx: SolverCtx):
     ds_goal = Measure("ds", domain=mesh, subdomain_id=labels['goal_face'])
     dxm     = Measure("dx", domain=mesh)
     ds_neumann     = Measure("ds", domain=mesh, subdomain_id=labels['neumannbcs']+labels['goal_face'])
+    ds_dirichlet = Measure("ds", domain=mesh, subdomain_id=labels['dirichletbcs'])
 
     F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm - g*v*ds_neumann
     bcs = [DirichletBC(V, u_exact, labels['dirichletbcs'])]
 
-    J = u*ds_goal
+    J = inner(grad(u), meshctx.n)*ds_dirichlet
     
-    return ProblemCtx(space=V, trial=u, test=v, residual=F, bcs=bcs, goal=J)
+    return ProblemCtx(space=V, trial=u, test=v, exact=u_exact, residual=F, bcs=bcs, goal=J, f=f, g=g)
 
 adaptive_problem = GoalAdaption(meshctx, define_problem, solverctx)
 

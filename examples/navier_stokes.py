@@ -40,10 +40,11 @@ solver_parameters = {
     "dorfler_alpha": 0.5,
     "goal_tolerance": 0.00001,
     "max_iterations": 10,
-    "output_dir": "../output/poisson2d",
+    "output_dir": "output/navierstokes",
     "parameter_init": 20,
     "parameter_final": 0.02,
-    "parameter_iterations": 10
+    "parameter_iterations": 10,
+    "write_at_iteration": True
 }
 
 solverctx = SolverCtx(solver_parameters)

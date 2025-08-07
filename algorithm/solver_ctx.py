@@ -9,7 +9,6 @@ class SolverCtx:
         self.dual_solve_method = config["dual_solve_method"]
         self.residual_solve_method = config["residual_solve_method"]
         self.dorfler_alpha = config["dorfler_alpha"]
-        self.tolerance = config["goal_tolerance"]
         self.max_iterations = config["max_iterations"]
         self.output_dir = config["output_dir"]
 
@@ -17,10 +16,11 @@ class SolverCtx:
         self.dual_solve_degree = eval(config.get("dual_solve_degree", "degree + 1"), {}, context)
         self.residual_degree = eval(config.get("residual_degree", "degree"), {}, context)
 
-        # (Optional) Parameters for GoalAdaptionStabilized 
+        # (Optional) Parameters, Required for GoalAdaptionStabilized 
         self.parameter_init = config.get("parameter_init", 1)
         self.parameter_final = config.get("parameter_final", 1)
         self.parameter_iterations = config.get("parameter_iterations", 1)
+        self.write_at_iteration = config.get("write_at_iteration", False)
 
     # Solver parameters
     sp_chol = {"pc_type": "cholesky",

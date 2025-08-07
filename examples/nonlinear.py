@@ -17,9 +17,10 @@ solver_parameters = {
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
     "dorfler_alpha": 0.5,
-    "goal_tolerance": 0.0001,
-    "max_iterations": 12,
-    "output_dir": "output/nonlinear"
+    "goal_tolerance": 0.000001,
+    "max_iterations": 30,
+    "output_dir": "output/nonlinear",
+    "write_at_iteration": True
 }
 
 solverctx = SolverCtx(solver_parameters)
@@ -30,15 +31,12 @@ def define_problem(meshctx: MeshCtx, solverctx: SolverCtx):
     V = FunctionSpace(mesh, "CG", solverctx.degree, variant="integral") # Template function space used to define the PDE
     u = Function(V, name="Solution")
     v = TestFunction(V)
-    coords = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
-    x, y = coords[0], coords[1]
+    (x, y) = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
     u_exact = sin(pi*x)*sin(pi*y)
     f = -div(grad(u_exact)) + u_exact**3
 
-    
     F = inner(grad(u), grad(v))*dx + u**3*v*dx- inner(f, v)*dx
     bcs = [DirichletBC(V, u_exact, "on_boundary")]
-
 
     J = dot(grad(u), meshctx.n)*ds(2)
 
