@@ -3,6 +3,7 @@ from netgen.occ import *
 import sys
 print("Interpreter:", sys.executable)
 from algorithm import *
+from algorithm.goal_adaptivity import getlabels
 
 # Define initial mesh ---------------------
 initial_mesh_size = 0.2
@@ -24,9 +25,7 @@ for f in shape.faces: # Assign face labels
 geo = OCCGeometry(shape)
 ngmesh = geo.GenerateMesh(maxh=initial_mesh_size)
 mesh = Mesh(ngmesh)
-VTKFile("adaptivemesh_unrefined.pvd").write(mesh)
 
-meshctx = MeshCtx(mesh)
 
 # Define solver parameters ---------------------
 solver_parameters = {
@@ -36,39 +35,34 @@ solver_parameters = {
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
     "dorfler_alpha": 0.5,
-    "goal_tolerance": 0.0001,
     "max_iterations": 30,
     "output_dir": "output/poisson3d",
     "write_at_iteration": True
 }
 
-solverctx = SolverCtx(solver_parameters)
+degree = 1
+n = FacetNormal(mesh)
+V = FunctionSpace(mesh, "CG", degree, variant="integral") # Template function space used to define the PDE
+u = Function(V, name="Solution")
+v = TestFunction(V)
+(x, y, z) = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
+u_exact = (x-1)*(y-1)**2
+G = as_vector(((y-1)**2, 2*(x-1)*(y-1), 0.0))
+g = dot(G,n)
+f = -div(grad(u_exact))
 
-# Define actual problem -----------------------
-def define_problem(meshctx: MeshCtx, solverctx: SolverCtx):
-    mesh = meshctx.mesh
-    V = FunctionSpace(mesh, "CG", solverctx.degree, variant="integral") # Template function space used to define the PDE
-    u = Function(V, name="Solution")
-    v = TestFunction(V)
-    (x, y, z) = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
-    u_exact = (x-1)*(y-1)**2
-    G = as_vector(((y-1)**2, 2*(x-1)*(y-1), 0.0))
-    g = dot(G,meshctx.n)
-    f = -div(grad(u_exact))
-    
-    labels = meshctx.labels
-    ds_goal = Measure("ds", domain=mesh, subdomain_id=labels['goal_face'])
-    dxm     = Measure("dx", domain=mesh)
-    ds_neumann     = Measure("ds", domain=mesh, subdomain_id=labels['neumannbcs']+labels['goal_face'])
-    ds_dirichlet = Measure("ds", domain=mesh, subdomain_id=labels['dirichletbcs'])
+labels = getlabels(mesh)
+ds_goal = Measure("ds", domain=mesh, subdomain_id=labels['goal_face'])
+dxm     = Measure("dx", domain=mesh)
+ds_neumann     = Measure("ds", domain=mesh, subdomain_id=labels['neumannbcs']+labels['goal_face'])
+ds_dirichlet = Measure("ds", domain=mesh, subdomain_id=labels['dirichletbcs'])
 
-    F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm - g*v*ds_neumann
-    bcs = [DirichletBC(V, u_exact, labels['dirichletbcs'])]
+F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm - g*v*ds_neumann
+bcs = [DirichletBC(V, u_exact, labels['dirichletbcs'])]
 
-    J = inner(grad(u), meshctx.n)*ds_dirichlet
-    
-    return ProblemCtx(space=V, trial=u, test=v, exact=u_exact, residual=F, bcs=bcs, goal=J, f=f, g=g)
+J = inner(grad(u), n)*ds_goal
+tolerance = 0.001
 
-adaptive_problem = GoalAdaption(meshctx, define_problem, solverctx)
+problem = NonlinearVariationalProblem(F, u, bcs)
 
-adaptive_problem.solve()
+GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, u_exact).solve()

@@ -16,3 +16,11 @@ In functionspace.py, TensorFunctionSpace:
 
 if shape is None:
     shape = (mesh.geometric_dimension(),) * 2
+
+3. 
+In mg/ufl_utils.py
+Changed inject to prolong in coarsen_function
+
+4.
+In /home/joefl/venv-firedrake/lib/python3.10/site-packages/firedrake/dmhooks.py:
+Commented out lines 270, 271

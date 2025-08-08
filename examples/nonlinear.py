@@ -7,8 +7,6 @@ nx = 10
 mesh = Mesh(unit_square.GenerateMesh(maxh=1/nx))
 degree = 1
 
-meshctx = MeshCtx(mesh)
-
 # Define solver parameters ---------------------
 solver_parameters = {
     "degree": 1,
@@ -23,26 +21,22 @@ solver_parameters = {
     "write_at_iteration": True
 }
 
-solverctx = SolverCtx(solver_parameters)
-
 # Define actual problem -----------------------
-def define_problem(meshctx: MeshCtx, solverctx: SolverCtx):
-    mesh = meshctx.mesh
-    V = FunctionSpace(mesh, "CG", solverctx.degree, variant="integral") # Template function space used to define the PDE
-    u = Function(V, name="Solution")
-    v = TestFunction(V)
-    (x, y) = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
-    u_exact = sin(pi*x)*sin(pi*y)
-    f = -div(grad(u_exact)) + u_exact**3
+n = FacetNormal(mesh)
+V = FunctionSpace(mesh, "CG", degree, variant="integral") # Template function space used to define the PDE
+u = Function(V, name="Solution")
+v = TestFunction(V)
+(x, y) = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
+u_exact = sin(pi*x)*sin(pi*y)
+f = -div(grad(u_exact)) + u_exact**3
 
-    F = inner(grad(u), grad(v))*dx + u**3*v*dx- inner(f, v)*dx
-    bcs = [DirichletBC(V, u_exact, "on_boundary")]
+F = inner(grad(u), grad(v))*dx + u**3*v*dx- inner(f, v)*dx
+bcs = [DirichletBC(V, u_exact, "on_boundary")]
 
-    J = dot(grad(u), meshctx.n)*ds(2)
+J = dot(grad(u), n)*ds(2)
+tolerance = 0.000001
 
-    return ProblemCtx(V, u, v, u_exact, F, bcs, J)
+problem = NonlinearVariationalProblem(F, u, bcs)
+GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, u_exact).solve()
 
 
-adaptive_problem = GoalAdaption(meshctx, define_problem, solverctx)
-
-adaptive_problem.solve()
