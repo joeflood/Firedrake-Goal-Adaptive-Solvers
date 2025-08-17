@@ -77,13 +77,11 @@ class SolverCtx:
     sp_cell2   = {"mat_type": "matfree",
                "snes_type": "ksponly",
                "ksp_type": "cg",
-               "ksp_monitor_true_residual": None,
                "pc_type": "jacobi",
                "pc_hypre_type": "pilut"}
     sp_facet1    = {"mat_type": "matfree",
                "snes_type": "ksponly",
                "ksp_type": "cg",
-               "ksp_monitor_true_residual": None,
                "pc_type": "jacobi",
                "pc_hypre_type": "pilut"}
     sp_facet2    = {"snes_type": "ksponly",

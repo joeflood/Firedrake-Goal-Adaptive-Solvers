@@ -1,8 +1,9 @@
 from firedrake import *
 from netgen.occ import *
 import sys
-from algorithm import *
+from goal_adaptivity import GoalAdaptiveNonlinearVariationalSolver
 
+sys.path.insert(0, "./algorithm")
 nx = 10
 mesh = Mesh(unit_square.GenerateMesh(maxh=1/nx))
 degree = 1

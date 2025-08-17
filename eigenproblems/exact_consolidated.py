@@ -11,7 +11,7 @@ from firedrake.__future__ import interpolate as interp  # symbolic interpolate
 # ----------------------------
 # Mesh and spaces
 # ----------------------------
-nx = 20
+nx = 10
 mesh = Mesh(unit_square.GenerateMesh(maxh=1/nx))
 
 degree = 1
@@ -27,8 +27,8 @@ up1 = TrialFunction(Vp1); vp1 = TestFunction(Vp1)
 Ap1 = inner(grad(up1), grad(vp1))*dx
 Mp1 = inner(up1, vp1)*dx
 bcs_p1 = [DirichletBC(Vp1, 0.0, "on_boundary")]
-nev = 200
-ncheck = 100
+nev = 20
+ncheck = 10
 
 # Automatic settings
 residual_degree = 1
@@ -52,19 +52,17 @@ def l2_normalize(f):
         f.assign(f/nrm)
     return f
 
-def solve_eigs(Aform, Mform, Vspace, bcs, nev):
+def solve_eigs(Aform, Mform, Vspace, bcs, nev, solver_parameters):
     prob = LinearEigenproblem(Aform, Mform, bcs=bcs, restrict=True)
     es = LinearEigensolver(prob, n_evals=nev,
-                           solver_parameters={"eps_gen_hermitian": None,
-                                              "eps_smallest_magnitude": None,
-                                              "eps_tol": 1e-12})
+                           solver_parameters=solver_parameters)
     nconv = es.solve()
     lam, vecs = [], []
     for i in range(min(nconv, nev)):
         lam.append(es.eigenvalue(i))
         vr, vi = es.eigenfunction(i)
-        vh = Function(Vspace); vh.assign(vr)
-        vecs.append(l2_normalize(vh))
+        #vh = Function(Vspace); vh.assign(vr)
+        vecs.append(l2_normalize(vr))
     return lam, vecs
 
 def best_match(target, pool, used):
@@ -82,9 +80,36 @@ def best_match(target, pool, used):
     used.add(best_i)
     return best_i, w
 
+solver_parameters1={"eps_gen_hermitian": None,
+                                              "eps_smallest_magnitude": None,
+                                              "eps_tol": 1e-12}
+
+tau = 20
+solver_parameters2 = {
+    # target a band around tau (user gives frequency/value, not an index)
+    "st_type": "sinvert",
+    "st_shift": float(tau),
+    "eps_target": float(tau),
+    "eps_which": "target_real",        # or target_magnitude
+    "eps_tol": 1e-10,
+
+    # inner “solve” = a few relaxation steps with a vertex-star patch PC
+    "st_ksp_type": "richardson",       # stationary (a relaxation)
+    "st_ksp_max_it": 2,                # 1–3 is typical for a filter
+    "st_ksp_richardson_scale": 1.0,    # or let PETSc pick
+    "st_pc_type": "python",
+    "st_pc_python_type": "firedrake.PatchPC",  # Firedrake patch PC
+    # Patch configuration: build vertex-star patches and do small exact local solves
+    "patch_construct_type": "star",    # vertex “star” patches
+    "patch_construct_codimension": 2,  # vertices on 2D meshes (1 in 3D); adjust as needed
+    "patch_pc_type": "lu",             # robust local solve
+    "patch_local_type": "additive",    # Schwarz additively
+    "patch_partition_of_unity": True,  # smooth assembly of corrections
+}
+
 # --- solve once per space ---
-lam_h,  Vp_vecs  = solve_eigs(A, M, V, bcs, nev=nev)
-lam_hp1, Vp1_vecs = solve_eigs(Ap1, Mp1, Vp1, bcs_p1, nev=nev)
+lam_h,  Vp_vecs  = solve_eigs(A, M, V, bcs, nev=nev, solver_parameters=solver_parameters1)
+lam_hp1, Vp1_vecs = solve_eigs(Ap1, Mp1, Vp1, bcs_p1, nev=nev, solver_parameters=solver_parameters1)
 
 def both(u):
     return u("+") + u("-")
@@ -97,13 +122,11 @@ def residual(form, test): # Residual helper function
 sp_cell2   = {"mat_type": "matfree",
             "snes_type": "ksponly",
             "ksp_type": "cg",
-            "ksp_monitor_true_residual": None,
             "pc_type": "jacobi",
             "pc_hypre_type": "pilut"}
 sp_facet1    = {"mat_type": "matfree",
             "snes_type": "ksponly",
             "ksp_type": "cg",
-            "ksp_monitor_true_residual": None,
             "pc_type": "jacobi",
             "pc_hypre_type": "pilut"}
     
@@ -128,7 +151,7 @@ def automatic_error_indicators(z_err, F):
 
     Rcell = Function(DG, name="Rcell") # Rcell polynomial
     ndofs = DG.dim()
-    print("Computing Rcells ...")
+    #print("Computing Rcells ...")
 
     assemble(Lc)
     solve(ac == Lc, Rcell, solver_parameters=sp_cell2) # solve for Rcell polynonmial
@@ -149,7 +172,7 @@ def automatic_error_indicators(z_err, F):
 
     Rhat = Function(Q)
     ndofs = Q.dim()
-    print("Computing Rfacets ...")
+    #print("Computing Rfacets ...")
     solve(af == Lf, Rhat, solver_parameters=sp_facet1)
     Rfacet = Rhat/cones
 
@@ -157,7 +180,7 @@ def automatic_error_indicators(z_err, F):
     DG0 = FunctionSpace(mesh, "DG", degree=0)
     test = TestFunction(DG0)
 
-    print("Computing eta_T indicators ...")
+    #print("Computing eta_T indicators ...")
     etaT = assemble(
         inner(inner(Rcell, z_err), test)*dx + 
         + inner(avg(inner(Rfacet, z_err)), both(test))*dS + 
@@ -198,7 +221,7 @@ def run_block(title, ncheck, v_provider, phi_provider):
         denom = 1.0 - sigma_h
         error_pred = abs(rhs / denom) if abs(denom) > 1e-14 else float("nan")
         diff = abs(error_exact - error_pred)
-        effectivity = error_exact / error_pred
+        effectivity = error_pred / error_exact
         rows.append((k, m, n, error_exact, error_pred, diff))
        
         # Manual error indicators

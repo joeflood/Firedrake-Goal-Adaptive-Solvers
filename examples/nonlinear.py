@@ -1,7 +1,7 @@
 from firedrake import *
 from netgen.occ import *
 import sys
-from algorithm import *
+from goal_adaptivity import GoalAdaptiveNonlinearVariationalSolver
 
 nx = 10
 mesh = Mesh(unit_square.GenerateMesh(maxh=1/nx))
