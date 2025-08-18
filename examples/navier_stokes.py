@@ -1,9 +1,9 @@
 from firedrake import *
 from netgen.occ import *
 import sys
-from algorithm import *
+from goal_adaptivity import GoalAdaptiveNonlinearVariationalSolver
 from ufl.algorithms.analysis import extract_constants
-from algorithm.goal_adaptivity import getlabels
+from goal_adaptivity import getlabels
 
 initial_mesh_size = 0.2
 
@@ -13,7 +13,7 @@ box2 = WorkPlane().MoveTo(1.4, 0).Rectangle(0.2, 0.5).Face()
 # Now they are geometric shapes you can combine
 shape = box1 - box2
 
-tol = 0.001
+tol = 0.01
 for f in shape.edges: # Assign face labels
     print(f.center.x)
     if abs(f.center.x - 4) < tol:
@@ -33,7 +33,7 @@ mesh = Mesh(ngmesh)
 # Define solver parameters ---------------------
 solver_parameters = {
     "degree": 1,
-    "dual_solve_method": "high_order",
+    "dual_solve_method": "star",
     "dual_solve_degree": "degree + 1",
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
@@ -68,7 +68,7 @@ p_outflow = 0
 n = FacetNormal(mesh)
 
 labels = getlabels(mesh)
-ds_outflow = Measure("ds", domain=mesh, subdomain_id=labels['outflow'])
+ds_outflow = Measure("ds", domain=mesh, subdomain_id=labels['inflow'])
 ds_inflow = Measure("ds", domain=mesh, subdomain_id=labels['inflow'])
 
 F = (
@@ -87,7 +87,6 @@ M = dot(u,n) * ds_outflow
 M_exact = 0.40863917 # Exact solution given in Rognes & Logg ex.3
 tolerance = 0.0001
 
-problem = NonlinearVariationalProblem(F, u, bcs)
+problem = NonlinearVariationalProblem(F, t, bcs)
 adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem,  M, tolerance, solver_parameters, exact_goal = M_exact)
-
 adaptive_problem.solve()

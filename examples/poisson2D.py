@@ -1,8 +1,8 @@
 from firedrake import *
 from netgen.occ import *
 import sys
-from algorithm import *
-from algorithm.goal_adaptivity import getlabels
+from goal_adaptivity import GoalAdaptiveNonlinearVariationalSolver
+from goal_adaptivity import getlabels
 
 # Define initial mesh ---------------------
 initial_mesh_size = 0.2
@@ -30,7 +30,7 @@ mesh = Mesh(unit_square.GenerateMesh(maxh=initial_mesh_size))
 # Define solver parameters ---------------------
 solver_parameters = {
     "degree": 1,
-    "dual_solve_method": "high_order",
+    "dual_solve_method": "star",
     "dual_solve_degree": "degree + 1",
     "residual_solve_method": "automatic",
     "residual_degree": "degree",

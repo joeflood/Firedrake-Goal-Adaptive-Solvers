@@ -444,7 +444,7 @@ class GAParameterContinuation(GoalAdaptiveNonlinearVariationalSolver): # Finish 
 
 def getlabels(mesh): # Doesn't seem to work in 2D ?
     ngmesh = mesh.netgen_mesh
-    names = ngmesh.GetRegionNames(codim=2)
+    names = ngmesh.GetRegionNames(codim=1)
     print(names)
     names_to_labels = {}
     for l in names:

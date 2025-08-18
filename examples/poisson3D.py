@@ -1,9 +1,8 @@
 from firedrake import *
 from netgen.occ import *
 import sys
-print("Interpreter:", sys.executable)
-from algorithm import *
-from algorithm.goal_adaptivity import getlabels
+from goal_adaptivity import GoalAdaptiveNonlinearVariationalSolver
+from goal_adaptivity import getlabels
 
 # Define initial mesh ---------------------
 initial_mesh_size = 0.2
@@ -14,10 +13,11 @@ box2 = Box(Pnt(0,0,-1), Pnt(1,1,0))
 box3 = Box(Pnt(0,-1,-1), Pnt(1,0,0))
 shape = box1 + box2 + box3
 
+tol = 0.00000001
 for f in shape.faces: # Assign face labels
-    if f.center.x == -1:
+    if f.center.x + 1 < tol:
         f.name = "goal_face"
-    elif f.center.x == 1 or f.center.y == 1:
+    elif f.center.x - 1 < tol or f.center.y - 1 < tol:
         f.name = "dirichletbcs"
     else: 
         f.name = "neumannbcs"  
@@ -30,7 +30,7 @@ mesh = Mesh(ngmesh)
 # Define solver parameters ---------------------
 solver_parameters = {
     "degree": 1,
-    "dual_solve_method": "high_order",
+    "dual_solve_method": "star",
     "dual_solve_degree": "degree + 1",
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
