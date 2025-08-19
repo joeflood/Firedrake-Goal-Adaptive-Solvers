@@ -21,6 +21,7 @@ class SolverCtx:
         self.parameter_final = config.get("parameter_final", 1)
         self.parameter_iterations = config.get("parameter_iterations", 1)
         self.write_at_iteration = config.get("write_at_iteration", False)
+        self.dual_solver_parameters = config.get("dual_solver_parameters", None)
 
     # Solver parameters
     sp_chol = {"pc_type": "cholesky",
@@ -56,7 +57,20 @@ class SolverCtx:
             "pc_type": "python",
             "pc_python_type": "firedrake.ASMStarPC",
             "pc_star_mat_ordering_type": "metisnd",
-            "pc_star_sub_sub_pc_type": "cholesky",
+            "pc_star_sub_sub_pc_type": "svd",
+            "pc_star_sub_sub_pc_svd_monitor": None,
+            }
+    sp_vanka = {"snes_type": "ksponly",
+            "ksp_type": "gmres",
+            "ksp_rtol": 1.0e-10,
+            "ksp_max_it": 20,
+            "ksp_convergence_test": "skip",
+            "ksp_monitor": None,
+            "pc_type": "python",
+            "pc_python_type": "firedrake.ASMVankaPC",
+            "pc_vanka_mat_ordering_type": "metisnd",
+            "pc_vanka_sub_sub_pc_type": "cholesky",
+            "pc_vanka_construct_dim": 0
             }
     sp_residual = {"snes_type": "ksponly",
             "ksp_type": "preonly",

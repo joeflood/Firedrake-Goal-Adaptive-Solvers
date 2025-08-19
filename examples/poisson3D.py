@@ -15,9 +15,9 @@ shape = box1 + box2 + box3
 
 tol = 0.00000001
 for f in shape.faces: # Assign face labels
-    if f.center.x + 1 < tol:
+    if abs(f.center.x + 1) < tol:
         f.name = "goal_face"
-    elif f.center.x - 1 < tol or f.center.y - 1 < tol:
+    elif abs(f.center.x - 1) < tol or abs(f.center.y - 1) < tol:
         f.name = "dirichletbcs"
     else: 
         f.name = "neumannbcs"  
@@ -60,7 +60,7 @@ ds_dirichlet = Measure("ds", domain=mesh, subdomain_id=labels['dirichletbcs'])
 F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm - g*v*ds_neumann
 bcs = [DirichletBC(V, u_exact, labels['dirichletbcs'])]
 
-J = inner(grad(u), n)*ds_goal
+J = u*ds_goal
 tolerance = 0.001
 
 problem = NonlinearVariationalProblem(F, u, bcs)

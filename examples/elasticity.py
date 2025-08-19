@@ -11,7 +11,7 @@ degree = 1
 # Define solver parameters ---------------------
 solver_parameters = {
     "degree": 1,
-    "dual_solve_method": "star",
+    "dual_solve_method": "vanka",
     "dual_solve_degree": "degree + 1",
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
@@ -78,7 +78,7 @@ bcs = []
 # Goal Functional
 psi = y * (y-1)
 M = inner(dot(sigma, n), as_vector([0, psi]))*ds(2)
-tolerance = 0.001
+tolerance = 0.00001
 
 problem = NonlinearVariationalProblem(F, t, bcs)
 

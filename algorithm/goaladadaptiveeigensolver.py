@@ -11,8 +11,9 @@ from functools import singledispatch
 from firedrake.mg.ufl_utils import coarsen
 from adaptive_mg.adaptive import AdaptiveMeshHierarchy
 from adaptive_mg.adaptive_transfer_manager import AdaptiveTransferManager
+import time
 
-class GoalAdaptiveNonlinearVariationalSolver():
+class GoalAdaptiveEigenSolver():
     '''
     Solves a goal adaption problem.
     Stores:
@@ -25,7 +26,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
     u_err ? Soon - for dual sol.            
     '''
 
-    def __init__(self, problem: NonlinearVariationalProblem, goal_functional, tolerance: float,  solver_parameters: dict, exact_solution = None, exact_goal = None):
+    def __init__(self, problem: LinearEigenproblem, goal_functional, tolerance: float,  solver_parameters: dict, exact_solution = None, exact_goal = None):
         self.problem = problem
         self.solver_parameters = solver_parameters
         self.J = goal_functional
@@ -54,6 +55,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
         self.eff1_vec = []
         self.eff2_vec = []
         self.eff3_vec = []
+    
+
+
 
     def solve_primal(self):
         ndofs = self.V.dim()
@@ -61,10 +65,8 @@ class GoalAdaptiveNonlinearVariationalSolver():
         self.N_vec.append(ndofs)
 
         print("Solving primal ...")
-        vel, pres = split(self.u)
-        vel_norm = assemble(inner(vel, vel)*dx)**0.5
-        print("u norm : ", vel_norm)
-        NonlinearVariationalSolver(self.problem).solve()
+        es = LinearEigensolver(self.problem, n_evals=n_evals, solver_parameters=solver_parameters)
+        es.solve()
 
     def solve_dual(self):
         s = self.solverctx
@@ -75,40 +77,38 @@ class GoalAdaptiveNonlinearVariationalSolver():
         dual_element = PMGPC.reconstruct_degree(element, dual_degree)
         Vdual = FunctionSpace(self.mesh, dual_element)
         vtest = TestFunction(Vdual) # Dual test function
-        self.z = Function(Vdual) # Dual soluton
+        vtrial = TrialFunction(Vdual)
 
         ndofs_dual = Vdual.dim()
         print("Dual problem dofs:", ndofs_dual)
         self.Ndual_vec.append(ndofs_dual)    
 
-        G = ( action(adjoint(derivative(self.F, self.u, TrialFunction(Vdual))), self.z) 
-             - derivative(self.J, self.u, vtest) )
-
+        test, trial = self.A.arguments()
+        A_adj = adjoint(self.problem.A)
+        M_adj = adjoint(self.problem.M)
+        A_dual = replace(A_adj, {test: vtest, trial:vtrial})
+        M_dual = replace(M_adj, {test: vtest, trial:vtrial})
+        bcs_dual = [bc.reconstruct(V=Vdual, indices=bc._indices, g=0) for bc in self.bcs]
+        problem_dual = LinearEigenproblem(A_dual, M_dual, bcs_dual)
+        
         # Dual ERROR - Implement today
         #eta_h_dual = abs(assemble(action(G, self.u_err)))
         #print("Etah dual = ", eta_h_dual)
         
-        bcs_dual  = [bc.reconstruct(V=Vdual, indices=bc._indices, g=0) for bc in self.bcs]
-        
-        print("Solving dual ...")
-        if s.dual_solve_method == "star":
-            print("Solving dual by star vertex relaxation ...")
-            solve(G == 0, self.z, bcs_dual, solver_parameters=s.sp_star)
-
-        elif s.dual_solve_method == "vanka":
-            print("Solving dual by vanka relaxation ...")
-            solve(G == 0, self.z, bcs_dual, solver_parameters=s.sp_vanka)
-
-        elif s.dual_solver_parameters is not None:
-            solve(G == 0, self.z, bcs_dual, solver_parameters=s.dual_solver_parameters)
-            
-        else:
-            
+        if s.dual_solve_method == "high_order":
+            print("Solving dual ...")
             solve(G == 0, self.z, bcs_dual, solver_parameters=s.sp_chol) # Obtain z
-            
-        #z_lo = Function(self.V, name="LowOrderDualSolution")
-        #z_lo.interpolate(self.z)
-        self.z_err = self.z
+            z_lo = Function(self.V, name="LowOrderDualSolution")
+            z_lo.interpolate(self.z)
+            self.z_err = self.z - z_lo
+    
+        elif s.dual_solve_method == "star":
+            print("Solving dual ...")
+            solve(G == 0, self.z, bcs_dual, solver_parameters=s.sp_star)
+            self.z_err = self.z    
+        
+        else:
+            print("ERROR: Unknown dual solve method.")
 
     def solve_u_err(self):
         element = self.V.ufl_element()
@@ -400,59 +400,28 @@ class GoalAdaptiveNonlinearVariationalSolver():
         return replace(F, {v: test})
     
 
-class GAParameterContinuation(GoalAdaptiveNonlinearVariationalSolver): # Finish this today, easy
-    def solve(self):
-        s = self.solverctx
+def l2_normalize(f):
+    nrm = assemble(inner(f, f)*dx)**0.5
+    if nrm > 0:
+        f.assign(f/nrm)
+    return f
 
-        for it in range(s.max_iterations):
-            print(f"Solving on level {it}")
-
-            print("Writing mesh ...")
-            VTKFile(self.output_dir / f"mesh{it}.pvd").write(self.mesh)
-
-            if it == 0:
-                nu_init = s.parameter_init
-                iterations = s.parameter_iterations
-                nu_final = s.parameter_final
-                nu = self.parameter
-                nu_vals = np.logspace(np.log10(nu_init), np.log10(nu_final), iterations)
-                
-                for nu_val in nu_vals:
-                    print(f"Primal iteration {nu_val}")
-
-                    nu.assign(nu_val)
-                    nu_in_form = extract_firedrake_constants(self.F)
-                    print("Nu in F: ", nu_in_form)
-                    self.solve_primal()
-            else:
-                self.solve_primal()
-            
-            print("Writing primal ...")
-            VTKFile(self.output_dir / f"solution_{it}.pvd").write(*self.u.subfunctions)
-
-            self.solve_dual()
-
-            self.compute_etah()
-            if self.eta_h < self.tolerance:
-                print("Error estimate below tolerance, finished.")
-                break
-
-            if it == s.max_iterations -1:
-                print(f"Maximum iteration ({s.max_iterations}) reached. Exiting.")
-                break
-
-            self.automatic_error_indicators()
-            self.compute_efficiency()
-            self.mark_and_refine()
-
-            if s.write_at_iteration == True:
-                print("Writing data ...")
-                self.append_data(it)
-
+def solve_eigs(Aform, Mform, Vspace, bcs, nev, solver_parameters):
+    prob = LinearEigenproblem(Aform, Mform, bcs=bcs, restrict=True)
+    es = LinearEigensolver(prob, n_evals=nev,
+                        solver_parameters=solver_parameters)
+    nconv = es.solve()
+    lam, vecs = [], []
+    for i in range(min(nconv, nev)):
+        lam.append(es.eigenvalue(i))
+        vr, vi = es.eigenfunction(i)
+        #vh = Function(Vspace); vh.assign(vr)
+        vecs.append(l2_normalize(vh))
+    return lam, vecs
 
 def getlabels(mesh): # Doesn't seem to work in 2D ?
     ngmesh = mesh.netgen_mesh
-    names = ngmesh.GetRegionNames(codim=1)
+    names = ngmesh.GetRegionNames(codim=2)
     print(names)
     names_to_labels = {}
     for l in names:
