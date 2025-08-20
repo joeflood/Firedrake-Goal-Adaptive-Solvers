@@ -14,6 +14,7 @@ class SolverCtx:
 
         context = {"degree": self.degree}
         self.dual_solve_degree = eval(config.get("dual_solve_degree", "degree + 1"), {}, context)
+        print(self.dual_solve_degree)
         self.residual_degree = eval(config.get("residual_degree", "degree"), {}, context)
 
         # (Optional) Parameters, Required for GoalAdaptionStabilized 
@@ -22,6 +23,7 @@ class SolverCtx:
         self.parameter_iterations = config.get("parameter_iterations", 1)
         self.write_at_iteration = config.get("write_at_iteration", False)
         self.dual_solver_parameters = config.get("dual_solver_parameters", None)
+        self.residual = config.get("residual", "primal")
 
     # Solver parameters
     sp_chol = {"pc_type": "cholesky",
@@ -57,8 +59,7 @@ class SolverCtx:
             "pc_type": "python",
             "pc_python_type": "firedrake.ASMStarPC",
             "pc_star_mat_ordering_type": "metisnd",
-            "pc_star_sub_sub_pc_type": "svd",
-            "pc_star_sub_sub_pc_svd_monitor": None,
+            "pc_star_sub_sub_pc_type": "cholesky"
             }
     sp_vanka = {"snes_type": "ksponly",
             "ksp_type": "gmres",

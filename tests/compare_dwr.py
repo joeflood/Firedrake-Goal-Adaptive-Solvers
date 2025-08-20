@@ -1,9 +1,10 @@
 from firedrake import *
 
 
-mesh = UnitSquareMesh(5, 5, quadrilateral=False)
+mesh = UnitSquareMesh(10, 10, quadrilateral=False)
 degree = 1
-V = FunctionSpace(mesh, "CG", degree, variant="integral")
+V = FunctionSpace(mesh, "CG", degree)
+print("DOF = ", V.dim())
 
 # PDE residual
 u = Function(V, name="Solution")
@@ -12,9 +13,9 @@ v = TestFunction(V)
 # MMS Method of Manufactured Solution
 (x, y) = SpatialCoordinate(u.function_space().mesh())
 u_exact = (x**2*y + 3*x*y**2)
-f = -div(grad(u_exact))
+f = -div(grad(u_exact)) + u_exact**3
 
-F = inner(grad(u), grad(v))*dx - inner(f, v)*dx
+F = inner(grad(u), grad(v))*dx + u**3*v*dx - inner(f, v)*dx
 bcs = [DirichletBC(V, u_exact, "on_boundary")]
 solve(F == 0, u, bcs=bcs)
 
@@ -72,6 +73,9 @@ sp_star = {"snes_type": "ksponly",
           }
 
 solve(G == 0, z, bcs_dual, solver_parameters=sp_chol) # Obtain z
+z_lo = Function(V).interpolate(z)
+z_err = z - z_lo
+
 
 Juh = assemble(J)
 Ju = assemble(replace(J, {u: u_exact}))

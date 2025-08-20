@@ -11,7 +11,7 @@ degree = 1
 # Define solver parameters ---------------------
 solver_parameters = {
     "degree": 1,
-    "dual_solve_method": "vanka",
+    "dual_solve_method": "high_order",
     "dual_solve_degree": "degree + 1",
     "residual_solve_method": "automatic",
     "residual_degree": "degree",

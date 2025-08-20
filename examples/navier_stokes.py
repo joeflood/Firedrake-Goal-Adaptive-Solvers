@@ -8,7 +8,7 @@ from goal_adaptivity import getlabels
 def l2_norm(f):
     return assemble(inner(f, f)*dx)**0.5
 
-initial_mesh_size = 1
+initial_mesh_size = 0.2
 
 box1 = WorkPlane().MoveTo(0, 0).Rectangle(4, 1).Face()
 box2 = WorkPlane().MoveTo(1.4, 0).Rectangle(0.2, 0.5).Face()
@@ -18,15 +18,11 @@ shape = box1 - box2
 
 tol = 0.01
 for f in shape.edges: # Assign face labels
-    print(f.center.x)
     if abs(f.center.x - 4) < tol:
-        print("Outflow named.")
         f.name = "outflow"
     elif abs(f.center.x) < tol:
-        print("Inflow named.")
         f.name = "inflow"
     else:
-        print("Dirichlet named")
         f.name = "dirichlet"
 
 geo = OCCGeometry(shape, dim = 2)
@@ -65,7 +61,7 @@ v, q = split(test)
 
 x, y = SpatialCoordinate(mesh)
 
-nu = Constant(0.2, name="nu") # Viscosity
+nu = Constant(0.02, name="nu") # Viscosity
 p_inflow = 1
 p_outflow = 0
 n = FacetNormal(mesh)
@@ -93,19 +89,19 @@ M = dot(u,n) * ds_outflow
 M_exact = 0.40863917 # Exact solution given in Rognes & Logg ex.3
 tolerance = 0.000001
 
-# # Parameter continuation loop for initial guess
-# visc_schedule = np.logspace(np.log10(0.05), np.log10(0.02), num=20)
+# Parameter continuation loop for initial guess
+visc_schedule = np.logspace(np.log10(0.05), np.log10(0.02), num=20)
 
-# for i, nu_val in enumerate(visc_schedule):
-#     nu.assign(float(nu_val))        # update viscosity Constant in-place
-#     if i == 0:
-#         t.assign(0.0)               # start from zero on the first step
-#     print(f"[continuation] {i+1}/{len(visc_schedule)} | nu = {float(nu_val):.6g}")
-#     nls.solve()                     # uses previous 't' as the initial guess for the next step
-#     u_norm = l2_norm(u)
-#     p_norm = l2_norm(p)
-#     print("l2 norm of u:", u_norm)
-#     print("l2 norm of p:", p_norm)
+for i, nu_val in enumerate(visc_schedule):
+    nu.assign(float(nu_val))        # update viscosity Constant in-place
+    if i == 0:
+        t.assign(0.0)               # start from zero on the first step
+    print(f"[continuation] {i+1}/{len(visc_schedule)} | nu = {float(nu_val):.6g}")
+    nls.solve()                     # uses previous 't' as the initial guess for the next step
+    u_norm = l2_norm(u)
+    p_norm = l2_norm(p)
+    print("l2 norm of u:", u_norm)
+    print("l2 norm of p:", p_norm)
 
-adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem,  M, tolerance, solver_parameters)
+adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem,  M, tolerance, solver_parameters, exact_goal=M_exact)
 adaptive_problem.solve()
