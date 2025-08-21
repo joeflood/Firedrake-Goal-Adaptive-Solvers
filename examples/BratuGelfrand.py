@@ -66,7 +66,7 @@ J = u * dx_goal
 # Define solver parameters ---------------------
 solver_parameters = {
     "degree": 1,
-    "dual_solve_method": "high_order",
+    #"dual_solve_method": "star",
     "dual_solve_degree": "degree + 1",
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
@@ -75,8 +75,8 @@ solver_parameters = {
     "max_iterations": 20,
     "output_dir": "output/nonlinear",
     "write_at_iteration": True,
-    "residual": "both",
-    "exact_indicators": True
+    #"residual": "both",
+    #"exact_indicators": True
 }
 
 # # Define actual problem -----------------------
@@ -95,7 +95,19 @@ solver_parameters = {
 # J = u * dx
 tolerance = 0.000001
 
+sp_dual = {"snes_type": "ksponly",
+            "ksp_type": "cg",
+            "ksp_rtol": 1.0e-10,
+            "ksp_max_it": 5,
+            "ksp_convergence_test": "skip",
+            "ksp_monitor": None,
+            "pc_type": "python",
+            "pc_python_type": "firedrake.ASMStarPC",
+            "pc_star_mat_ordering_type": "metisnd",
+            "pc_star_sub_sub_pc_type": "cholesky"
+}
+
 problem = NonlinearVariationalProblem(F, u, bcs)
-GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, exact_solution=u_exact).solve()
+GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, exact_solution=u_exact, dual_solver_parameters=sp_dual).solve()
 
 

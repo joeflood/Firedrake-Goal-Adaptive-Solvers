@@ -53,7 +53,7 @@ class SolverCtx:
     sp_star = {"snes_type": "ksponly",
             "ksp_type": "cg",
             "ksp_rtol": 1.0e-10,
-            "ksp_max_it": 5,
+            "ksp_max_it": 20,
             "ksp_convergence_test": "skip",
             "ksp_monitor": None,
             "pc_type": "python",

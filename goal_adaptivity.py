@@ -134,7 +134,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
             
         self.z_lo = Function(self.V, name="LowOrderDualSolution")
         self.z_lo.interpolate(self.z)
-        self.z_err = self.z - self.z_lo
+        self.z_err = self.z #- self.z_lo
 
     def compute_etah(self):
         # Compute error estimate F(z)

@@ -8,7 +8,7 @@ from goal_adaptivity import getlabels
 def l2_norm(f):
     return assemble(inner(f, f)*dx)**0.5
 
-initial_mesh_size = 0.2
+initial_mesh_size = 0.01
 
 box1 = WorkPlane().MoveTo(0, 0).Rectangle(4, 1).Face()
 box2 = WorkPlane().MoveTo(1.4, 0).Rectangle(0.2, 0.5).Face()
@@ -82,7 +82,8 @@ F = (
 bcs = [DirichletBC(T.sub(0), 0, sub_domain=labels['dirichlet'])]
 
 sp_primal = {"snes_monitor": None,
-             "snes_linesearch_monitor": None}
+             "snes_linesearch_monitor": None,
+             "snes_linesearch_type": "l2"}
 
 problem = NonlinearVariationalProblem(F, t, bcs)
 nls = NonlinearVariationalSolver(problem, solver_parameters=sp_primal)
