@@ -61,8 +61,24 @@ F = inner(grad(u), grad(v))*dxm - inner(f, v)*dxm - g*v*ds_neumann
 bcs = [DirichletBC(V, u_exact, labels['dirichletbcs'])]
 
 J = u*ds_goal
-tolerance = 0.001
+tolerance = 0.00001
+
+sp_dual = {"snes_type": "ksponly",
+            "ksp_type": "cg",
+            "ksp_rtol": 1.0e-10,
+            "ksp_max_it": 5,
+            "ksp_convergence_test": "skip",
+            "ksp_monitor": None,
+            "pc_type": "python",
+            "pc_python_type": "firedrake.ASMStarPC",
+            "pc_star_mat_ordering_type": "metisnd",
+            "pc_star_sub_sub_pc_type": "cholesky"
+            }
+
+sp_primal = {"pc_type": "cholesky",
+            "pc_factor_mat_solver_type": "mumps"}
 
 problem = NonlinearVariationalProblem(F, u, bcs)
 
-GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, u_exact).solve()
+GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, primal_solver_parameters=sp_primal,
+                                       dual_solver_parameters=sp_dual, exact_solution=u_exact).solve()

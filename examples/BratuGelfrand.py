@@ -75,7 +75,8 @@ solver_parameters = {
     "max_iterations": 20,
     "output_dir": "output/nonlinear",
     "write_at_iteration": True,
-    #"residual": "both"
+    "residual": "both",
+    "exact_indicators": True
 }
 
 # # Define actual problem -----------------------
@@ -95,6 +96,6 @@ solver_parameters = {
 tolerance = 0.000001
 
 problem = NonlinearVariationalProblem(F, u, bcs)
-GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, u_exact).solve()
+GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, exact_solution=u_exact).solve()
 
 

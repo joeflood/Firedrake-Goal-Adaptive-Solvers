@@ -25,11 +25,13 @@ class GoalAdaptiveNonlinearVariationalSolver():
     u_err ? Soon - for dual sol.            
     '''
 
-    def __init__(self, problem: NonlinearVariationalProblem, goal_functional, tolerance: float,  solver_parameters: dict, exact_solution = None, exact_goal = None):
+    def __init__(self, problem: NonlinearVariationalProblem, goal_functional, tolerance: float,  solver_parameters: dict,*, primal_solver_parameters = None, dual_solver_parameters = None, exact_solution = None, exact_goal = None):
         self.problem = problem
         self.solver_parameters = solver_parameters
         self.J = goal_functional
         self.tolerance = tolerance
+        self.sp_primal = primal_solver_parameters
+        self.sp_dual = dual_solver_parameters
 
         self.V = problem.u.function_space()
         self.u = problem.u
@@ -60,13 +62,17 @@ class GoalAdaptiveNonlinearVariationalSolver():
         ndofs = self.V.dim()
         self.N_vec.append(ndofs)
         print(f"Solving primal (degree: {self.solverctx.degree}, dofs: {ndofs}) ...")
-        NonlinearVariationalSolver(self.problem).solve()
-
+        if self.sp_primal is None:
+            print("Method: Default nonlinear solve")
+            NonlinearVariationalSolver(self.problem).solve()
+        else:
+            print("Method: User defined")
+            NonlinearVariationalSolver(self.problem, solver_parameters=self.sp_primal).solve()
+        
         if self.solverctx.residual == "both":
             element = self.V.ufl_element()
             degree = element.degree()
-            high_degree = self.solverctx.dual_solve_degree
-            high_element = PMGPC.reconstruct_degree(element, high_degree)
+            high_element = PMGPC.reconstruct_degree(element, degree + 1)
             Vhigh = FunctionSpace(self.mesh, high_element)
             test = TestFunction(Vhigh) # Dual test function
             self.u_high = Function(Vhigh) # Dual soluton
@@ -74,11 +80,16 @@ class GoalAdaptiveNonlinearVariationalSolver():
             v_high = TestFunction(Vhigh)
             F_high = ufl.replace(self.F, {v_old: v_high, self.u: self.u_high})
             bcs_high = reconstruct_bcs(self.bcs, Vhigh)
-           
-            #self.problem_high = NonlinearVariationalProblem(F_high, self.u_high, bcs_high)
-            print(f"Solving primal in higher space for error estimate (degree: {self.solverctx.dual_solve_degree}, dofs: {Vhigh.dim()}) ...")
-            #NonlinearVariationalSolver(self.problem_high).solve()
-            solve(F_high == 0, self.u_high, bcs_high, solver_parameters=self.solverctx.sp_chol)
+            self.problem_high = NonlinearVariationalProblem(F_high, self.u_high, bcs_high)
+            
+            print(f"Solving primal in higher space for error estimate (degree: {degree + 1}, dofs: {Vhigh.dim()}) ...")
+            if self.sp_primal is None:
+                print("Method: Default nonlinear solve")
+                NonlinearVariationalSolver(self.problem_high).solve()
+            else:
+                print("Method: User defined")
+                NonlinearVariationalSolver(self.problem_high, solver_parameters=self.sp_primal).solve()
+            
             self.u_err = self.u_high - self.u
 
     def solve_dual(self):
@@ -86,7 +97,6 @@ class GoalAdaptiveNonlinearVariationalSolver():
 
         element = self.V.ufl_element()
         degree = element.degree()
-        dual_degree = s.dual_solve_degree
         dual_element = PMGPC.reconstruct_degree(element, degree +1)
         Vdual = FunctionSpace(self.mesh, dual_element)
         vtest = TestFunction(Vdual) # Dual test function
@@ -100,20 +110,26 @@ class GoalAdaptiveNonlinearVariationalSolver():
         
         bcs_dual  = [bc.reconstruct(V=Vdual, indices=bc._indices, g=0) for bc in self.bcs]
         
+        print(f"Solving dual (degree: {degree + 1}, dofs: {ndofs_dual}) ...")
         if s.dual_solve_method == "star":
-            print("Solving dual by star vertex relaxation ...")
+            print("Method: Vertex star relaxation")
             solve(self.G == 0, self.z, bcs_dual, solver_parameters=s.sp_star)
 
         elif s.dual_solve_method == "vanka":
-            print("Solving dual by vanka relaxation ...")
+            print("Method: Vanka relaxation")
             solve(self.G == 0, self.z, bcs_dual, solver_parameters=s.sp_vanka)
 
+        elif s.dual_solve_method == "cholesky":
+            print("Method: Cholesky")
+            solve(self.G == 0, self.z, bcs_dual, solver_parameters=s.sp_chol)
+                  
         elif s.dual_solver_parameters is not None:
+            print("Method: User defined")
             solve(self.G == 0, self.z, bcs_dual, solver_parameters=s.dual_solver_parameters)
             
         else:
-            
-            solve(self.G == 0, self.z, bcs_dual, solver_parameters=s.sp_chol) # Obtain z
+            print("Method: Default nonlinear solve")
+            solve(self.G == 0, self.z, bcs_dual)
             
         self.z_lo = Function(self.V, name="LowOrderDualSolution")
         self.z_lo.interpolate(self.z)
@@ -266,6 +282,18 @@ class GoalAdaptiveNonlinearVariationalSolver():
     
         else:
             self.etaT = eta_primal
+
+        if self.solverctx.exact_indicators == True:
+            u_err_exact = self.u_exact - self.u
+            eta_dual_exact = Function(DG0)
+            assemble(
+                inner(inner(Rcell_star,   u_err_exact), test)*dx
+                + inner(avg(inner(Rfacet_star,    u_err_exact)),both(test))*dS
+                + inner(inner(Rfacet_star,  u_err_exact), test)*ds
+            )
+            diff = assemble(eta_dual - eta_dual_exact)
+            L2_diff = assemble(diff**2 * dx)**0.5
+            print("L2 error in (dual) refinement indicators: ", L2_diff)
 
     def manual_error_indicators(self): # Poisson ONLY!!!!!!!!!!
         print("Computing local refinement indicators (η_K)...")

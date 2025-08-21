@@ -82,7 +82,7 @@ tolerance = 0.00001
 
 problem = NonlinearVariationalProblem(F, t, bcs)
 
-adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem, M, tolerance, solver_parameters, exact_sol)
+adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem, M, tolerance, solver_parameters, exact_solution=exact_sol)
 
 adaptive_problem.solve()
 

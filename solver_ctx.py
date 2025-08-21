@@ -14,7 +14,6 @@ class SolverCtx:
 
         context = {"degree": self.degree}
         self.dual_solve_degree = eval(config.get("dual_solve_degree", "degree + 1"), {}, context)
-        print(self.dual_solve_degree)
         self.residual_degree = eval(config.get("residual_degree", "degree"), {}, context)
 
         # (Optional) Parameters, Required for GoalAdaptionStabilized 
@@ -24,6 +23,7 @@ class SolverCtx:
         self.write_at_iteration = config.get("write_at_iteration", False)
         self.dual_solver_parameters = config.get("dual_solver_parameters", None)
         self.residual = config.get("residual", "primal")
+        self.exact_indicators = config.get("exact_indicators", False)
 
     # Solver parameters
     sp_chol = {"pc_type": "cholesky",
@@ -104,3 +104,4 @@ class SolverCtx:
                "pc_type": "hypre",
                "pc_hypre_type": "pilut"}
     sp_etaT = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
+    sp_newton = {"snes_linesearch-type": "l2"}
