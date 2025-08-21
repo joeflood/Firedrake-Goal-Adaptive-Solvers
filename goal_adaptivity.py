@@ -123,9 +123,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
             print("Method: Cholesky")
             solve(self.G == 0, self.z, bcs_dual, solver_parameters=s.sp_chol)
                   
-        elif s.dual_solver_parameters is not None:
+        elif self.sp_dual is not None:
             print("Method: User defined")
-            solve(self.G == 0, self.z, bcs_dual, solver_parameters=s.dual_solver_parameters)
+            solve(self.G == 0, self.z, bcs_dual, solver_parameters=self.sp_dual)
             
         else:
             print("Method: Default nonlinear solve")

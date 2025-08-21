@@ -30,7 +30,7 @@ mesh = Mesh(ngmesh)
 # Define solver parameters ---------------------
 solver_parameters = {
     "degree": 1,
-    "dual_solve_method": "star",
+    #"dual_solve_method": "star",
     "dual_solve_degree": "degree + 1",
     "residual_solve_method": "automatic",
     "residual_degree": "degree",
@@ -65,8 +65,8 @@ tolerance = 0.00001
 
 sp_dual = {"snes_type": "ksponly",
             "ksp_type": "cg",
-            "ksp_rtol": 1.0e-10,
-            "ksp_max_it": 5,
+            "ksp_rtol": 1.0e-3,
+            "ksp_max_it": 100,
             "ksp_convergence_test": "skip",
             "ksp_monitor": None,
             "pc_type": "python",

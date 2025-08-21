@@ -6,7 +6,7 @@ from functools import cached_property
 class SolverCtx:
     def __init__(self, config: dict):
         self.degree = config["degree"]
-        self.dual_solve_method = config["dual_solve_method"]
+        self.dual_solve_method = config.get("dual_solve_method", None)
         self.residual_solve_method = config["residual_solve_method"]
         self.dorfler_alpha = config["dorfler_alpha"]
         self.max_iterations = config["max_iterations"]
