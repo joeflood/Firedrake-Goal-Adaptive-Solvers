@@ -9,8 +9,8 @@ from tsfc.ufl_utils import extract_firedrake_constants
 import os
 from functools import singledispatch
 from firedrake.mg.ufl_utils import coarsen
-from adaptive_mg.adaptive import AdaptiveMeshHierarchy
-from adaptive_mg.adaptive_transfer_manager import AdaptiveTransferManager
+from adaptive import AdaptiveMeshHierarchy
+from adaptive_transfer_manager import AdaptiveTransferManager
 
 class GoalAdaptiveNonlinearVariationalSolver():
     '''
@@ -90,6 +90,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
                 print("Method: User defined")
                 NonlinearVariationalSolver(self.problem_high, solver_parameters=self.sp_primal).solve()
             
+            #self.u.project(self.u_high) gives BAD results
             self.u_err = self.u_high - self.u
 
     def solve_dual(self):
@@ -147,6 +148,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
             print(f"{'Primal error, |ρ(u_h;z-z_h)|:':50s}{primal_err:20.12f}")
             print(f"{'Dual error, |ρ*(z_h;u-u_h)|:':50s}{dual_err:20.12f}")
             self.eta_h = abs(0.5* primal_err + 0.5*dual_err)
+            print(f"Difference between primal and dual errors: {abs(primal_err-dual_err)}")
         else:
             self.eta_h = abs(assemble(self.residual(self.F, self.z_err)))
         # Add in average with adjoint residual G(u) for nonlinear problems
@@ -285,15 +287,15 @@ class GoalAdaptiveNonlinearVariationalSolver():
 
         if self.solverctx.exact_indicators == True:
             u_err_exact = self.u_exact - self.u
-            eta_dual_exact = Function(DG0)
-            assemble(
+            eta_dual_exact = assemble(
                 inner(inner(Rcell_star,   u_err_exact), test)*dx
                 + inner(avg(inner(Rfacet_star,    u_err_exact)),both(test))*dS
                 + inner(inner(Rfacet_star,  u_err_exact), test)*ds
             )
-            diff = assemble(eta_dual - eta_dual_exact)
-            L2_diff = assemble(diff**2 * dx)**0.5
-            print("L2 error in (dual) refinement indicators: ", L2_diff)
+            udiff = assemble(eta_dual_exact - eta_dual)
+            with udiff.dat.vec as uvec:
+                unorm = uvec.norm()
+            print("L2 error in (dual) refinement indicators: ", unorm)
 
     def manual_error_indicators(self): # Poisson ONLY!!!!!!!!!!
         print("Computing local refinement indicators (η_K)...")

@@ -37,7 +37,8 @@ solver_parameters = {
     "dorfler_alpha": 0.5,
     "max_iterations": 30,
     "output_dir": "output/poisson3d",
-    "write_at_iteration": True
+    "write_at_iteration": True,
+    "exact_indicators": True
 }
 
 degree = 1

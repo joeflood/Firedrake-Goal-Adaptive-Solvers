@@ -81,8 +81,11 @@ F = (
 
 bcs = [DirichletBC(T.sub(0), 0, sub_domain=labels['dirichlet'])]
 
+sp_primal = {"snes_monitor": None,
+             "snes_linesearch_monitor": None}
+
 problem = NonlinearVariationalProblem(F, t, bcs)
-nls = NonlinearVariationalSolver(problem)
+nls = NonlinearVariationalSolver(problem, solver_parameters=sp_primal)
 
 # Goal Functional
 M = dot(u,n) * ds_outflow
@@ -103,5 +106,6 @@ for i, nu_val in enumerate(visc_schedule):
     print("l2 norm of u:", u_norm)
     print("l2 norm of p:", p_norm)
 
-adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem,  M, tolerance, solver_parameters, exact_goal=M_exact)
+
+adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem,  M, tolerance, solver_parameters, exact_goal=M_exact, primal_solver_parameters=sp_primal)
 adaptive_problem.solve()
