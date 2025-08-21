@@ -11,16 +11,12 @@ Comment out the following lines:
 #if integral_type.startswith("interior_facet") and diagonal and any(a.function_space().finat_element.is_dg() for a in arguments):
 #raise NotImplementedError("Sorry, we can't assemble the diagonal of a form for interior facet integrals") # EDITED BY JF
 
-2. 
+2. Maybe already done ?
 In functionspace.py, TensorFunctionSpace:
 
 if shape is None:
     shape = (mesh.geometric_dimension(),) * 2
 
-3. 
-In mg/ufl_utils.py
-Changed inject to prolong in coarsen_function
-
-4.
+3. Just a warning , worth commmenting out
 In /home/joefl/venv-firedrake/lib/python3.10/site-packages/firedrake/dmhooks.py:
 Commented out lines 270, 271

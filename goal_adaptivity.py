@@ -364,11 +364,11 @@ class GoalAdaptiveNonlinearVariationalSolver():
                 return as_vector([e[idx] for e in exprs for idx in np.ndindex(e.ufl_shape)])
             if type(self.u_exact) == list or type(self.u_exact) == tuple:
                 u_exact_vec = as_mixed(self.u_exact)
-                self.u_exact = coarsen(u_exact_vec, coarsen, coefficient_mapping=coef_map)
+                self.u_exact = refine(u_exact_vec, refine, coefficient_mapping=coef_map)
             else:
-                self.u_exact = coarsen(self.u_exact, coarsen, coefficient_mapping=coef_map)
-        self.problem = coarsen(self.problem, coarsen, coefficient_mapping=coef_map)
-        self.J = coarsen(self.J, coarsen, coefficient_mapping=coef_map)
+                self.u_exact = refine(self.u_exact, refine, coefficient_mapping=coef_map)
+        self.problem = refine(self.problem, refine, coefficient_mapping=coef_map)
+        self.J = refine(self.J, refine, coefficient_mapping=coef_map)
         self.F = self.problem.F
         self.u = self.problem.u
         self.bcs = self.problem.bcs
@@ -488,3 +488,29 @@ def reconstruct_bcs(bcs, V):
         new_bcs.append(bc.reconstruct(V=V_, g=g))
 
     return new_bcs
+
+
+from ufl.duals import is_dual
+from firedrake.dmhooks import get_transfer_manager
+
+@singledispatch
+def refine(expr, self, coefficient_mapping=None):
+    return coarsen(expr, self, coefficient_mapping=coefficient_mapping)  # fallback to original
+
+@refine.register(firedrake.Cofunction)
+@refine.register(firedrake.Function)
+def refine_function(expr, self, coefficient_mapping=None):
+    if coefficient_mapping is None:
+        coefficient_mapping = {}
+    new = coefficient_mapping.get(expr)
+    if new is None:
+        Vf = expr.function_space()
+        Vc = self(Vf, self)
+        new = firedrake.Function(Vc, name=f"coarse_{expr.name()}")
+        manager = get_transfer_manager(Vf.dm)
+        if is_dual(expr):
+            manager.restrict(expr, new)
+        else:
+            manager.prolong(expr, new)
+        coefficient_mapping[expr] = new
+    return new
