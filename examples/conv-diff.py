@@ -13,7 +13,7 @@ def boundary_labels(mesh):
     return names_to_labels
 
 sys.path.insert(0, "./algorithm")
-initial_mesh_size = 0.1
+initial_mesh_size = 0.01
 shape = WorkPlane().MoveTo(-1, -1).Rectangle(2, 2).Face()
 
 tol = 0.00001
@@ -45,10 +45,10 @@ solver_parameters = {
     "max_iterations": 20,
     "output_dir": "output/conv-diff-new",
     "manual_indicators": False,
-    "dual_extra_degree": 3,
+    "dual_extra_degree": 1,
     "use_adjoint_residual": True,
-    "primal_low_method": "project",
-    "dual_low_method": "project",
+    "primal_low_method": "interpolate",
+    "dual_low_method": "interpolate",
     "write_mesh": "no",
     "write_solution": "no"
     #"uniform_refinement": True
@@ -72,7 +72,7 @@ F = eps * inner(grad(u),grad(v)) *dx + inner(vel, grad(u)) * v * dx
 
 # bcs = [bc_ym1, bc_y1, bc_xm1, bc_x1]
 
-M = 0.5*eps * inner(u,u) *dx  
+M = inner(grad(u),grad(u)) *dx  
 tolerance = 0.000000001
 
 exact_sol = x * (1-exp((y-1)/eps)) / (1-exp(-2/eps))
