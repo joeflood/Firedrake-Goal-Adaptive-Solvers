@@ -83,9 +83,9 @@ def run_case(primal_low_method, dual_low_method, out_root="output/elasticity-bat
         "results_file_name": f"{primal_low_method}-{dual_low_method}"
     }
 
-    problem = NonlinearVariationalProblem(F, u, bcs)
+    problem = NonlinearVariationalProblem(F, t, bcs)
     adapt = GoalAdaptiveNonlinearVariationalSolver(
-        problem, J, tolerance, solver_parameters, exact_solution=u_exact
+        problem, M, tolerance, solver_parameters, exact_solution=exact_sol
     )
     print(f"\n=== RUN {primal_low_method=}, {dual_low_method=} ===")
     adapt.solve()
