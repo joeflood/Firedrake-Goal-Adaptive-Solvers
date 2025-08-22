@@ -14,41 +14,34 @@ from adaptive_transfer_manager import AdaptiveTransferManager
 
 class GoalAdaptiveNonlinearVariationalSolver():
     '''
-    Solves a goal adaption problem.
-    Stores:
-    solverctx: Keep? Look at what Firedrake solve functions do
-
-    State: (For each iteration)
-    u
-    z
-    z_err
-    u_err ? Soon - for dual sol.            
+    Solves a nonlinear variational problem to minimise the error in a user-specified goal functional.
+    We do this by adaptively refining the mesh based on the solution to a dual problem - which links the goal functional 
+    to the PDE.     
     '''
 
     def __init__(self, problem: NonlinearVariationalProblem, goal_functional, tolerance: float,  solver_parameters: dict,*, primal_solver_parameters = None, dual_solver_parameters = None, exact_solution = None, exact_goal = None):
+        # User input vars
         self.problem = problem
-        self.solver_parameters = solver_parameters
         self.J = goal_functional
         self.tolerance = tolerance
         self.sp_primal = primal_solver_parameters
         self.sp_dual = dual_solver_parameters
-
+        self.u_exact = exact_solution
+        self.goal_exact = exact_goal
+        self.solverctx = SolverCtx(solver_parameters) # To store solver parameter data - Unnecessary, could remove in future.
+        # Derived vars
         self.V = problem.u.function_space()
         self.u = problem.u
         self.bcs = problem.bcs
         self.F = problem.F
-        self.u_exact = exact_solution
-        self.goal_exact = exact_goal
-        # We also need other things
         self.element = self.V.ufl_element()
         self.degree = self.element.degree()
         self.test = TestFunction(self.V)
         self.mesh = self.V.mesh()
-        self.solverctx = SolverCtx(solver_parameters) # To store solver data (Maybe remove?)
 
+        # Data storage and writing
         self.output_dir = Path(self.solverctx.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)  # ensures folder exists
-
         self.N_vec = []
         self.Ndual_vec = []
         self.eta_vec = []
@@ -132,31 +125,29 @@ class GoalAdaptiveNonlinearVariationalSolver():
             self.eta_h = abs(0.5* primal_err + 0.5*dual_err)
         else:
             self.eta_h = abs(assemble(self.residual(self.F, self.z_err)))
-        # Add in average with adjoint residual G(u) for nonlinear problems
 
-        # Append to state vectors for later
         self.etah_vec.append(self.eta_h)
 
-        # Compute true error in J(uh)
         Juh = assemble(self.J)
         print(f"{'Computed goal':45s}{'J(uh):':8s}{Juh:15.12f}")
 
         if self.u_exact is not None:
+            quad_opts = {"quadrature_degree": 20}
             def as_mixed(exprs):
                 return as_vector([e[idx] for e in exprs for idx in np.ndindex(e.ufl_shape)])
             if type(self.u_exact) == list or type(self.u_exact) == tuple:
-                Ju = assemble(replace(self.J, {self.u: as_mixed(self.u_exact)}))
+                self.Ju = assemble(replace(self.J, {self.u: as_mixed(self.u_exact)}), form_compiler_parameters=quad_opts)
             else:
-                Ju = assemble(replace(self.J, {self.u: self.u_exact}))
-
-        if self.goal_exact is not None:
-            Ju = self.goal_exact
+                self.Ju = assemble(replace(self.J, {self.u: self.u_exact}), form_compiler_parameters=quad_opts)
+        elif self.goal_exact is not None:
+            self.Ju = self.goal_exact
         
-        self.eta = abs(Juh - Ju)
-        self.eta_vec.append(self.eta)
-        print(f"{'Exact goal':45s}{'J(u):':8s}{Ju:15.12f}")
-        print(f"{'True error, |J(u) - J(u_h)|':45s}{'η:':8s}{self.eta:15.12f}")
-
+        if self.u_exact is not None or self.goal_exact is not None:
+            self.eta = abs(Juh - self.Ju)
+            self.eta_vec.append(self.eta)
+            print(f"{'Exact goal':45s}{'J(u):':8s}{self.Ju:15.12f}")
+            print(f"{'True error, |J(u) - J(u_h)|':45s}{'η:':8s}{self.eta:15.12f}")
+        
         if s.use_adjoint_residual == True:
             print(f"{'Primal error, |ρ(u_h;z-z_h)|:':45s}{'η_pri:':8s}{primal_err:15.12f}")
             print(f"{'Dual error, |ρ*(z_h;u-u_h)|:':45s}{'η_adj:':8s}{dual_err:15.12f}")
@@ -167,16 +158,15 @@ class GoalAdaptiveNonlinearVariationalSolver():
 
     def automatic_error_indicators(self):
         print("Computing local refinement indicators, η_K...")
-        # 7. Compute cell and facet residuals R_T, R_\partialT
+        # 7. Compute cell and facet residuals R_T, R_\partialT       
         s = self.solverctx
         dim = self.mesh.topological_dimension()
         cell = self.mesh.ufl_cell()
-        print(self.degree)
         variant = "integral" # Finite element type 
         cell_residual_degree = self.degree + s.cell_residual_extra_degree
         facet_residuaL_degree = self.degree + s.facet_residual_extra_degree
-
-        # ---------------- Equation 4.6 to find cell residual Rcell -------------------------
+        # ------------------------------- Primal residual -------------------------------
+        # Rcell
         B = FunctionSpace(self.mesh, "B", dim+1, variant=variant) # Bubble function space
         bubbles = Function(B).assign(1) # Bubbles
         # Discontinuous function space of Rcell polynomials
@@ -192,13 +182,10 @@ class GoalAdaptiveNonlinearVariationalSolver():
         assemble(Lc)
         solve(ac == Lc, Rcell, solver_parameters=s.sp_cell) # solve for Rcell polynonmial
 
-        def both(u):
-            return u("+") + u("-")
-
-        # ---------------- Equation 4.8 to find facet residual Rfacet -------------------------
+        # Rfacet
         FB = FunctionSpace(self.mesh, "FB", dim, variant=variant) # Cone function space
         cones = Function(FB).assign(1) # Cones
-
+        # Broken discontinuous function space of facet polynomials
         el = BrokenElement(FiniteElement("FB", cell=cell, degree=facet_residuaL_degree+dim, variant=variant))
         if self.V.value_shape == ():
             Q = FunctionSpace(self.mesh, el)
@@ -207,24 +194,23 @@ class GoalAdaptiveNonlinearVariationalSolver():
         Qtest = TestFunction(Q)
         Qtrial = TrialFunction(Q)
         Lf = self.residual(self.F, Qtest) - inner(Rcell, Qtest)*dx
-        af = both(inner(Qtrial/cones, Qtest))*dS + inner(Qtrial/cones, Qtest)*ds
-
+        af = self.both(inner(Qtrial/cones, Qtest))*dS + inner(Qtrial/cones, Qtest)*ds
         Rhat = Function(Q)
         solve(af == Lf, Rhat, solver_parameters=s.sp_facet)
         Rfacet = Rhat/cones
         
-        # 8. Compute error indicators eta_T 
+        # Primal error indicators
         DG0 = FunctionSpace(self.mesh, "DG", degree=0)
         test = TestFunction(DG0)
 
         eta_primal = assemble(
             inner(inner(Rcell, self.z_err), test)*dx + 
-            + inner(avg(inner(Rfacet, self.z_err)), both(test))*dS + 
+            + inner(avg(inner(Rfacet, self.z_err)), self.both(test))*dS + 
             + inner(inner(Rfacet, self.z_err), test)*ds
         )
         
+        # ------------------------------- Adjoint residual -------------------------------
         if s.use_adjoint_residual == True:
-            # dual residual form r*(·)
             (vF,) = self.F.arguments()  # test Argument used in self.F
             # r*(v) = J'(u)[v] - A'_u(u)[v, z]  since self.F = A(u;v) - L(v)
             rstar_form = derivative(self.J, self.u, vF) - derivative(replace(self.F, {vF: self.z}), self.u, vF)
@@ -242,20 +228,20 @@ class GoalAdaptiveNonlinearVariationalSolver():
             # indicators: 0.5 * (primal + dual)
             eta_dual = assemble(
                 inner(inner(Rcell_star,   self.u_err), test)*dx
-                + inner(avg(inner(Rfacet_star,    self.u_err)),both(test))*dS
+                + inner(avg(inner(Rfacet_star,    self.u_err)),self.both(test))*dS
                 + inner(inner(Rfacet_star,  self.u_err), test)*ds
             )
 
             self.etaT = assemble(0.5*(eta_primal + eta_dual))
-    
         else:
             self.etaT = eta_primal
 
+        # Exact error indicators (experimental - ignore)
         if self.solverctx.exact_indicators == True:
             u_err_exact = self.u_exact - self.u
             eta_dual_exact = assemble(
                 inner(inner(Rcell_star,   u_err_exact), test)*dx
-                + inner(avg(inner(Rfacet_star,    u_err_exact)),both(test))*dS
+                + inner(avg(inner(Rfacet_star,    u_err_exact)),self.both(test))*dS
                 + inner(inner(Rfacet_star,  u_err_exact), test)*ds
             )
             udiff = assemble(eta_dual_exact - eta_dual)
@@ -263,20 +249,19 @@ class GoalAdaptiveNonlinearVariationalSolver():
                 unorm = uvec.norm()
             print("L2 error in (dual) refinement indicators: ", unorm)
 
-    def manual_error_indicators(self): # Poisson ONLY!!!!!!!!!!
-        print("Computing local refinement indicators (η_K)...")
+    def manual_error_indicators(self):
+        ''' Currently only implemented for Poisson, but can be overriden. To adapt to other PDEs, replace the form of 
+        self.etaT = assemble() to the symbolic form of the error indicators. This form is usually obtained by integrating 
+        the weak form by parts (to recover the strong form) and redistributing facet fluxes.
+        '''
+        print("[MANUAL] Computing local refinement indicators (η_K)...")
         s = self.solverctx
         n = FacetNormal(self.mesh)
-
         DG0 = FunctionSpace(self.mesh, "DG", degree=0)
         test = TestFunction(DG0)
-
-        def both(u):
-            return u("+") + u("-")
-
         self.etaT = assemble(
             inner(self.f + div(grad(self.u)), self.z_err * test) * dx +
-            inner(0.5*jump(-grad(self.u), n), self.z_err * both(test)) * dS +
+            inner(0.5*jump(-grad(self.u), n), self.z_err * self.both(test)) * dS +
             inner(dot(-grad(self.u), n), self.z_err * test) * ds
         )
 
@@ -303,6 +288,8 @@ class GoalAdaptiveNonlinearVariationalSolver():
             self.eff3_vec.append(self.eff3)
 
     def mark_cells(self):
+        ''' Only Dorfler marking is implemented currently. Can be overridden if other marking strategies are desired. 
+        '''
         s = self.solverctx
         # 9. Mark cells for refinement (Dorfler marking)
         sorted_indices = np.argsort(-self.etaT_array)
@@ -320,6 +307,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
             marr[marked_cells] = 1
 
     def uniform_refine(self):
+        # Uniform marking for comparison tests
         markers_space = FunctionSpace(self.mesh, "DG", 0)
         self.markers = Function(markers_space)
         self.markers.assign(1)        
@@ -349,7 +337,6 @@ class GoalAdaptiveNonlinearVariationalSolver():
         self.problem = NonlinearVariationalProblem(self.F,self.u,self.bcs)
         self.mesh = new_mesh
        
-            
     def write_data(self):
         # Write to file
         rows = list(zip(self.N_vec, self.Ndual_vec, self.eta_vec, self.etah_vec, self.etaTsum_vec, self.eff1_vec, self.eff2_vec))
@@ -443,14 +430,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
     def residual(self, F, test): # Residual helper function
         v = F.arguments()[0]
         return replace(F, {v: test})
-
-def getlabels(mesh, codim):
-    ngmesh = mesh.netgen_mesh
-    names = ngmesh.GetRegionNames(codim=codim)
-    names_to_labels = {}
-    for l in names:
-        names_to_labels[l] = tuple(i+1 for i, name in enumerate(names) if name == l)
-    return names_to_labels
+    
+    def both(self, u):
+        return u("+") + u("-")
 
 def reconstruct_bc_value(bc, V):
     if not isinstance(bc._original_arg, firedrake.Function):
@@ -494,3 +476,12 @@ def refine_function(expr, self, coefficient_mapping=None):
             manager.prolong(expr, new)
         coefficient_mapping[expr] = new
     return new
+
+# Only required for my examples:
+def getlabels(mesh, codim):
+    ngmesh = mesh.netgen_mesh
+    names = ngmesh.GetRegionNames(codim=codim)
+    names_to_labels = {}
+    for l in names:
+        names_to_labels[l] = tuple(i+1 for i, name in enumerate(names) if name == l)
+    return names_to_labels

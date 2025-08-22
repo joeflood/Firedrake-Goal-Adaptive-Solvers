@@ -44,35 +44,61 @@ labels = boundary_labels(mesh)
 solver_parameters = {
     "max_iterations": 20,
     "output_dir": "output/conv-diff-new",
+    "manual_indicators": True
     #"uniform_refinement": True
     #"use_adjoint_residual": True
 }
 
-degree = 1
+degree = 2
 V = FunctionSpace(mesh,"CG",degree)
 u = Function(V)
 v = TestFunction(V)
-eps = Constant(0.001)
+eps = Constant(1/200)
 vel = Constant(as_vector([0, 1]))
 F = eps * inner(grad(u),grad(v)) *dx + inner(vel, grad(u)) * v * dx 
 
 
 (x,y) = SpatialCoordinate(mesh)
-bc_ym1 = DirichletBC(V, x**3 + 1, labels['ym1'])
-bc_y1 = DirichletBC(V, 0.0, labels['y1'])
-bc_xm1 = DirichletBC(V, 0.0, labels['xm1'])
-bc_x1  = DirichletBC(V, conditional(le(abs(y - 1.0), tol), 0.0, 2.0), labels['x1'])
+# bc_ym1 = DirichletBC(V, x, labels['ym1'])
+# bc_y1 = DirichletBC(V, 0.0, labels['y1'])
+# bc_xm1 = DirichletBC(V, 0.0, labels['xm1'])
+# bc_x1  = DirichletBC(V, conditional(le(abs(y - 1.0), tol), 0.0, 2.0), labels['x1'])
 
-bcs = [bc_ym1, bc_y1, bc_xm1, bc_x1]
+# bcs = [bc_ym1, bc_y1, bc_xm1, bc_x1]
 
-M = 0.5*eps * inner(grad(u),grad(u)) *dx  
-tolerance = 0.00001
+M = 0.5*eps * inner(u,u) *dx  
+tolerance = 0.000000001
 
-exact_sol = (x**3 + 1) * (1-exp((y-1)/eps)) / (1-exp(-2/eps))
+exact_sol = x * (1-exp((y-1)/eps)) / (1-exp(-2/eps))
+bcs = DirichletBC(V, exact_sol, "on_boundary")
 
 problem = NonlinearVariationalProblem(F, u, bcs)
-adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem, M, tolerance, solver_parameters, 
+
+# Manual indicator test for comparison
+class GoalAdaptiveConvDiff(GoalAdaptiveNonlinearVariationalSolver):
+    def manual_error_indicators(self):
+        print("[MANUAL] Computing local refinement indicators (η_K)...")
+        s = self.solverctx
+        n = FacetNormal(self.mesh)
+        DG0 = FunctionSpace(self.mesh, "DG", degree=0)
+        test = TestFunction(DG0)
+
+        eps = Constant(1/200)
+        vel = Constant(as_vector([0, 1]))   
+        self.etaT = assemble(
+            inner(-eps * div(grad(self.u)) + dot(vel,grad(self.u)) , self.z_err * test) * dx +
+            inner(0.5*eps*jump(-grad(self.u), n), self.z_err * self.both(test)) * dS +
+            inner(eps*dot(-grad(self.u), n), self.z_err * test) * ds
+        )
+
+
+adaptive_problem = GoalAdaptiveConvDiff(problem, M, tolerance, solver_parameters, 
                                                           exact_solution=exact_sol)
 adaptive_problem.solve()
+
+
+#adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem, M, tolerance, solver_parameters, 
+#                                                          exact_solution=exact_sol)
+#adaptive_problem.solve()
 
 
