@@ -66,14 +66,14 @@ p_inflow = 1
 p_outflow = 0
 n = FacetNormal(mesh)
 
-labels = getlabels(mesh)
+labels = getlabels(mesh, codim=1)
 ds_outflow = Measure("ds", domain=mesh, subdomain_id=labels['outflow'])
 ds_inflow = Measure("ds", domain=mesh, subdomain_id=labels['inflow'])
 
 F = (
-    nu * inner(grad(u), grad(v)) * dx +
+    2*nu * inner(sym(grad(u)), sym(grad(v))) * dx +
     inner(dot(u, grad(u)),v) * dx -
-    inner(p, div(v)) * dx +
+    inner(p, div(v)) * dx -
     inner(div(u), q) * dx +
     inner(p_outflow * n, v) * ds_outflow +
     inner(p_inflow * n, v) * ds_inflow
@@ -96,12 +96,16 @@ tolerance = 0.000001
 # Parameter continuation loop for initial guess
 visc_schedule = np.logspace(np.log10(0.05), np.log10(0.02), num=20)
 
+pvd = VTKFile("output/navier_stokes.pvd")
+t.subfunctions[0].rename("Velocity")
+t.subfunctions[1].rename("Pressure")
 for i, nu_val in enumerate(visc_schedule):
     nu.assign(float(nu_val))        # update viscosity Constant in-place
     if i == 0:
         t.assign(0.0)               # start from zero on the first step
-    print(f"[continuation] {i+1}/{len(visc_schedule)} | nu = {float(nu_val):.6g}")
+    print(f"[continuation] {i+1}/{len(visc_schedule)} | nu = {float(nu_val):.6g} dim = {t.function_space().dim()}")
     nls.solve()                     # uses previous 't' as the initial guess for the next step
+    pvd.write(t.subfunctions[0], t.subfunctions[1], time=float(nu_val))
     u_norm = l2_norm(u)
     p_norm = l2_norm(p)
     print("l2 norm of u:", u_norm)
