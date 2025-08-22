@@ -16,6 +16,16 @@ class SolverCtx:
         self.use_adjoint_residual = config.get("use_adjoint_residual", False) # For switching between primal and primal + adjoint residuals
         self.exact_indicators = config.get("exact_indicators", False) # Maybe remove
         self.uniform_refinement = config.get("uniform_refinement", False)
+        self.primal_low_method = config.get("primal_low_method", "interpolate")
+        self.dual_low_method = config.get("dual_low_method", "interpolate")
+        self.write_mesh = config.get("write_mesh", "all") # Default all, options: "first_and_last" "by iteration" "none"
+        self.write_mesh_iteration_vector = config.get("write_iteration_vector", [])
+        self.write_mesh_iteration_interval = config.get("write_iteration_interval", 1)
+        self.write_solution = config.get("write_solution", "all") # Default all, options: "first_and_last" "by iteration" "none"
+        self.write_solution_iteration_vector = config.get("write_iteration_vector", [])
+        self.write_solution_iteration_interval = config.get("write_solution", "all") # Default all, options: "first_and_last" "by iteration" "none"
+        self.results_file_name = config.get("results_file_name", None)
+    
     # Solver parameters
     sp_cell   = {"mat_type": "matfree",
                "snes_type": "ksponly",

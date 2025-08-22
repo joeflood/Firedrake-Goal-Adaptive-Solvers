@@ -55,14 +55,16 @@ class GoalAdaptiveNonlinearVariationalSolver():
         s = self.solverctx
         ndofs = self.V.dim()
         self.N_vec.append(ndofs)
-        if self.sp_primal is None:
-            print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: Default nonlinear solve] ...")
-            NonlinearVariationalSolver(self.problem).solve()
-        else:
-            print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: User defined] ...")
-            NonlinearVariationalSolver(self.problem, solver_parameters=self.sp_primal).solve()
+        def solve_uh():
+            if self.sp_primal is None:
+                print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: Default nonlinear solve] ...")
+                NonlinearVariationalSolver(self.problem).solve()
+            else:
+                print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: User defined] ...")
+                NonlinearVariationalSolver(self.problem, solver_parameters=self.sp_primal).solve()
         
         if s.use_adjoint_residual == True:
+            # Now solve in higher space
             high_degree = self.degree + s.dual_extra_degree # By default use dual degree
             high_element = PMGPC.reconstruct_degree(self.element, high_degree)
             Vhigh = FunctionSpace(self.mesh, high_element)
@@ -81,8 +83,15 @@ class GoalAdaptiveNonlinearVariationalSolver():
                 print(f"Solving primal in higher space for error estimate (degree: {high_degree}, dofs: {Vhigh.dim()}) [Method: User defined] ...")
                 NonlinearVariationalSolver(self.problem_high, solver_parameters=self.sp_primal).solve()
             
-            #self.u.project(self.u_high) OR self.u.interpolate(self.u_high) gives BAD results WHY?
+            if s.primal_low_method == "solve":
+                solve_uh()
+            elif s.primal_low_method == "project":
+                self.u.project(self.u_high)
+            else:
+                self.u.interpolate(self.u_high) # Default - but gives bad results?
             self.u_err = self.u_high - self.u
+        else:
+            solve_uh()
 
     def solve_dual(self):
         s = self.solverctx
@@ -108,9 +117,29 @@ class GoalAdaptiveNonlinearVariationalSolver():
         else:
             print(f"Solving dual (degree: {dual_degree}, dofs: {ndofs_dual}) [Method: User defined] ...")
             solve(self.G == 0, self.z, bcs_dual, solver_parameters=self.sp_dual)
+        
+        # zlo
+        self.z_lo = Function(self.V) # Dual soluton
+        if s.dual_low_method == "solve":
+            ndofs = self.V.dim()
+            test = TestFunction(self.V)
+            G_lo = ( action(adjoint(derivative(self.F, self.u, TrialFunction(self.V))), self.z_lo) 
+                - derivative(self.J, self.u, test) )
             
-        self.z_lo = Function(self.V, name="LowOrderDualSolution")
-        self.z_lo.interpolate(self.z)
+            bcs_dual_low  = [bc.reconstruct(V=self.V, indices=bc._indices, g=0) for bc in self.bcs]
+                    
+            if self.sp_dual is None:
+                print(f"Solving dual in V (degree: {self.degree}, dofs: {ndofs}) [Method: Default nonlinear solve] ...")
+                solve(G_lo == 0, self.z_lo, bcs_dual_low)
+                
+            else:
+                print(f"Solving dual in V (degree: {self.degree}, dofs: {ndofs}) [Method: User defined] ...")
+                solve(G_lo == 0, self.z_lo, bcs_dual_low, solver_parameters=self.sp_dual)
+        elif s.dual_low_method == "project":
+            self.z_lo.project(self.z)
+        else:
+            self.z_lo.interpolate(self.z) #Default method
+        
         self.z_err = self.z - self.z_lo
 
     def compute_etah(self):
@@ -338,17 +367,26 @@ class GoalAdaptiveNonlinearVariationalSolver():
         self.mesh = new_mesh
        
     def write_data(self):
+        s = self.solverctx
         # Write to file
+        if s.results_file_name is None:
+            file_path = self.output_dir / "results.csv"
+        else:
+            file_path = self.output_dir / s.results_file_name
         rows = list(zip(self.N_vec, self.Ndual_vec, self.eta_vec, self.etah_vec, self.etaTsum_vec, self.eff1_vec, self.eff2_vec))
         headers = ("N", "Ndual", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
-        with open(self.output_dir / "results.csv", "w", newline="") as file:
+        with open(file_path, "w", newline="") as file:
             w = csv.writer(file)
             w.writerow(headers)
             w.writerows(rows)
             jump
 
     def append_data(self, it):
-        file_path = self.output_dir / "results.csv"
+        s = self.solverctx
+        if s.results_file_name is None:
+            file_path = self.output_dir / "results.csv"
+        else:
+            file_path = self.output_dir / s.results_file_name
         if self.u_exact is None and self.solverctx.uniform_refinement == False:
             headers = ("iteration", "N", "Ndual", "eta_h", "sum_eta_T")
             row = (
@@ -379,32 +417,71 @@ class GoalAdaptiveNonlinearVariationalSolver():
             with open(file_path, "a", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerow(row)
-        
+    
+    def write_mesh(self,it):
+        s = self.solverctx
+        should_write = False
+        if s.write_mesh == "all":
+            should_write = True
+        elif s.write_mesh == "first_and_last":
+                if it == 0 or it == s.max_iterations:
+                    should_write = True
+        elif s.write_mesh == "by_iteration":
+                # Case A: user gave specific iterations (list/tuple/set)
+                if getattr(s, "write_mesh_iteration_vector", None) is not None:
+                    # allow any iterable; convert to set for O(1) lookup
+                    targets = set(s.write_iteration_vector)
+                    should_write = it in targets
+                # Case B: otherwise use interval (positive int)
+                elif getattr(s, "write_mesh_iteration_interval", None) is not None:
+                    interval = int(s.write_iteration_interval)
+                    if interval <= 0:
+                        raise ValueError("write_mesh_iteration_interval must be a positive integer")
+                    should_write = (it % interval == 0)  # includes it=0
+        if should_write:
+            print("Writing mesh ...")
+            VTKFile(self.output_dir / f"mesh{it}.pvd").write(self.mesh)
+
+    def write_solution(self,it):
+        s = self.solverctx
+        should_write = False
+        if s.write_solution == "all":
+            should_write = True
+        elif s.write_solution == "first_and_last":
+                if it == 0 or it == s.max_iterations:
+                    should_write = True
+        elif s.write_solution == "by_iteration":
+                # Case A: user gave specific iterations (list/tuple/set)
+                if getattr(s, "write_solution_iteration_vector", None) is not None:
+                    # allow any iterable; convert to set for O(1) lookup
+                    targets = set(s.write_iteration_vector)
+                    should_write = it in targets
+                # Case B: otherwise use interval (positive int)
+                elif getattr(s, "write_solution_iteration_interval", None) is not None:
+                    interval = int(s.write_iteration_interval)
+                    if interval <= 0:
+                        raise ValueError("write_solution_iteration_interval must be a positive integer")
+                    should_write = (it % interval == 0)  # includes it=0
+        if should_write:
+            print("Writing (primal) solution ...")
+            VTKFile(self.output_dir / f"solution_{it}.pvd").write(*self.u.subfunctions)
 
     def solve(self):
         s = self.solverctx
 
         for it in range(s.max_iterations):
             print(f"---------------------------- [MESH LEVEL {it}] ----------------------------")
-
-            print("Writing mesh ...")
-            VTKFile(self.output_dir / f"mesh{it}.pvd").write(self.mesh)
-
+            self.write_mesh(it)
             self.solve_primal()
-            print("Writing primal solution ...")
-            VTKFile(self.output_dir / f"solution_{it}.pvd").write(*self.u.subfunctions)
-
+            self.write_solution(it)
             self.solve_dual()
-
             self.compute_etah()
             if self.eta_h < self.tolerance:
                 print("Error estimate below tolerance, finished.")
                 break
-
             if it == s.max_iterations -1:
                 print(f"Maximum iteration ({s.max_iterations}) reached. Exiting.")
                 break
-            
             if s.uniform_refinement == True:
                 print("Refining uniformly")
                 self.uniform_refine()
@@ -415,11 +492,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
                     self.automatic_error_indicators()
                 self.compute_efficiency()
                 self.mark_cells()
-            
             if s.write_at_iteration == True:
                 print("Appending data ...")
                 self.append_data(it)
-
             self.refine_mesh()
 
         if s.write_at_iteration == False:

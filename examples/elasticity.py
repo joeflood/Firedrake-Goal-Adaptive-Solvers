@@ -11,7 +11,12 @@ degree = 1
 # Define solver parameters ---------------------
 solver_parameters = {
     "max_iterations": 20,
-    "output_dir": "output/conv-diff-new",
+    "output_dir": "output/elasticity",
+    "manual_indicators": False,
+    "dual_extra_degree": 1,
+    "use_adjoint_residual": True,
+    "primal_low_method": "solve",
+    "dual_low_method": "interpolate"
     #"uniform_refinement": True
     #"use_adjoint_residual": True
 }

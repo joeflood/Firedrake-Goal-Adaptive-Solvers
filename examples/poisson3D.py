@@ -29,7 +29,7 @@ mesh = Mesh(ngmesh)
 
 # Define solver parameters ---------------------
 solver_parameters = {
-    "max_iterations": 20,
+    "max_iterations": 5,
     "output_dir": "output/conv-diff-new",
     #"uniform_refinement": True
     #"use_adjoint_residual": True

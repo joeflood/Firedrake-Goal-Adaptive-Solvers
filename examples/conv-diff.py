@@ -44,12 +44,18 @@ labels = boundary_labels(mesh)
 solver_parameters = {
     "max_iterations": 20,
     "output_dir": "output/conv-diff-new",
-    "manual_indicators": True
+    "manual_indicators": False,
+    "dual_extra_degree": 3,
+    "use_adjoint_residual": True,
+    "primal_low_method": "project",
+    "dual_low_method": "project",
+    "write_mesh": "no",
+    "write_solution": "no"
     #"uniform_refinement": True
     #"use_adjoint_residual": True
 }
 
-degree = 2
+degree = 1
 V = FunctionSpace(mesh,"CG",degree)
 u = Function(V)
 v = TestFunction(V)
@@ -86,19 +92,17 @@ class GoalAdaptiveConvDiff(GoalAdaptiveNonlinearVariationalSolver):
         eps = Constant(1/200)
         vel = Constant(as_vector([0, 1]))   
         self.etaT = assemble(
-            inner(-eps * div(grad(self.u)) + dot(vel,grad(self.u)) , self.z_err * test) * dx +
-            inner(0.5*eps*jump(-grad(self.u), n), self.z_err * self.both(test)) * dS +
-            inner(eps*dot(-grad(self.u), n), self.z_err * test) * ds
-        )
+            eps * dot(grad(self.u),grad(self.z_err)) * test * dx
+            + dot(vel , grad(self.u)) * self.z_err * test * dx
+            )
+        
 
 
-adaptive_problem = GoalAdaptiveConvDiff(problem, M, tolerance, solver_parameters, 
-                                                          exact_solution=exact_sol)
-adaptive_problem.solve()
-
-
-#adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem, M, tolerance, solver_parameters, 
-#                                                          exact_solution=exact_sol)
+#adaptive_problem = GoalAdaptiveConvDiff(problem, M, tolerance, solver_parameters, exact_solution=exact_sol)
 #adaptive_problem.solve()
+
+
+adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem, M, tolerance, solver_parameters, exact_solution=exact_sol)
+adaptive_problem.solve()
 
 
