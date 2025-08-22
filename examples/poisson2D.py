@@ -5,21 +5,34 @@ from goal_adaptivity import GoalAdaptiveNonlinearVariationalSolver
 from goal_adaptivity import getlabels
 
 # Define initial mesh ---------------------
-initial_mesh_size = 0.1
+initial_mesh_size = 0.2
+
+box1 = WorkPlane().MoveTo(-1, 0).Rectangle(1, 1).Face()
+box2 = WorkPlane().MoveTo(0, 0).Rectangle(1, 1).Face()
+box3 = WorkPlane().MoveTo(0, -1).Rectangle(1, 1).Face()
+
+# Now they are geometric shapes you can combine
+shape = box1 + box2 + box3
+
+tol = 0.00001
+for f in shape.edges: # Assign face labels
+    if abs(f.center.x + 1) < tol:
+        print("named: ", f.center.x)
+        f.name = 'goal_face'
+        print(f.name)
+
+geo = OCCGeometry(shape, dim = 2)
+ngmesh = geo.GenerateMesh(maxh=initial_mesh_size)
+mesh = Mesh(ngmesh)
+
 mesh = Mesh(unit_square.GenerateMesh(maxh=initial_mesh_size))
 
 # Define solver parameters ---------------------
 solver_parameters = {
-    "degree": 1,
-    "dual_solve_method": "high_order",
-    "dual_solve_degree": "degree + 1",
-    "residual_solve_method": "automatic",
-    "residual_degree": "degree",
-    "dorfler_alpha": 0.5,
-    "goal_tolerance": 0.000001,
-    "max_iterations": 30,
-    "output_dir": "output/poisson2d",
-    "write_at_iteration": True
+    "max_iterations": 20,
+    "output_dir": "output/conv-diff-new",
+    #"uniform_refinement": True
+    #"use_adjoint_residual": True
 }
 
 degree = 1
@@ -38,6 +51,23 @@ bcs = [DirichletBC(V, u_exact, "on_boundary")]
 J = dot(grad(u), n) * ds
 tolerance = 0.0001
 
+sp_dual = {"snes_type": "ksponly",
+            "ksp_type": "cg",
+            "ksp_rtol": 1.0e-3,
+            "ksp_max_it": 5,
+            "ksp_convergence_test": "skip",
+            "ksp_monitor": None,
+            "pc_type": "python",
+            "pc_python_type": "firedrake.ASMStarPC",
+            "pc_star_mat_ordering_type": "metisnd",
+            "pc_star_sub_sub_pc_type": "cholesky"
+            }
+
+sp_primal = {"pc_type": "cholesky",
+            "pc_factor_mat_solver_type": "mumps"}
+
 problem = NonlinearVariationalProblem(F, u, bcs)
 
-GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, u_exact).solve()
+GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, primal_solver_parameters=sp_primal,
+                                       dual_solver_parameters=sp_dual, 
+                                       exact_solution=u_exact).solve()

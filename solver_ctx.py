@@ -5,62 +5,41 @@ from functools import cached_property
 
 class SolverCtx:
     def __init__(self, config: dict):
-        self.degree = config["degree"]
-        self.dual_solve_method = config.get("dual_solve_method", None)
-        self.residual_solve_method = config["residual_solve_method"]
-        self.dorfler_alpha = config["dorfler_alpha"]
-        self.max_iterations = config["max_iterations"]
-        self.output_dir = config["output_dir"]
-
-        context = {"degree": self.degree}
-        self.dual_solve_degree = eval(config.get("dual_solve_degree", "degree + 1"), {}, context)
-        self.residual_degree = eval(config.get("residual_degree", "degree"), {}, context)
-
-        # (Optional) Parameters, Required for GoalAdaptionStabilized 
-        self.parameter_init = config.get("parameter_init", 1)
-        self.parameter_final = config.get("parameter_final", 1)
-        self.parameter_iterations = config.get("parameter_iterations", 1)
-        self.write_at_iteration = config.get("write_at_iteration", False)
-        self.dual_solver_parameters = config.get("dual_solver_parameters", None)
-        self.residual = config.get("residual", "primal")
-        self.exact_indicators = config.get("exact_indicators", False)
-
+        self.manual_indicators = config.get("manual_indicators", False) # Used for manual indicators (only implemented for Poisson but could be overriden)
+        self.dorfler_alpha = config.get("dorfler_alpha", 0.5) # Dorfler marking parameter, default 0.5
+        self.max_iterations = config.get("max_iterations", 10)
+        self.output_dir = config.get("output_dir", "./output")
+        self.dual_extra_degree = config.get("dual_extra_degree", 1)
+        self.cell_residual_extra_degree = config.get("cell_residual_extra_degree", 0)
+        self.facet_residual_extra_degree = config.get("facet_residual_extra_degree", 0)
+        self.write_at_iteration = config.get("write_at_iteration", True)
+        self.use_adjoint_residual = config.get("use_adjoint_residual", False) # For switching between primal and primal + adjoint residuals
+        self.exact_indicators = config.get("exact_indicators", False) # Maybe remove
+        self.uniform_refinement = config.get("uniform_refinement", False)
     # Solver parameters
-    sp_chol = {"pc_type": "cholesky",
-            "pc_factor_mat_solver_type": "mumps"}
-    sp_pmg = {"snes_type": "ksponly",
-            "ksp_type": "cg",
-            "ksp_rtol": 1.0e-10,
-            "ksp_max_it": 1,
-            "ksp_convergence_test": "skip",
-            "ksp_monitor": None,
-            "pc_type": "python",
-            "pc_python_type": "firedrake.P1PC",
-            "pmg_mg_coarse": {
-                "pc_type": "python",
-                "pc_python_type": "firedrake.AssembledPC",
-                "assembled_pc_type": "cholesky",
-            },
-            "pmg_mg_levels": {
-                "ksp_max_it": 10,
-                "ksp_type": "chebyshev",
-                "pc_type": "python",
-                "pc_python_type": "firedrake.ASMStarPC",
-                "pc_star_mat_ordering_type": "metisnd",
-                "pc_star_sub_sub_pc_type": "cholesky",
-            }
-        }
+    sp_cell   = {"mat_type": "matfree",
+               "snes_type": "ksponly",
+               "ksp_type": "cg",
+               "pc_type": "jacobi",
+               "pc_hypre_type": "pilut"}
+    sp_facet    = {"mat_type": "matfree",
+               "snes_type": "ksponly",
+               "ksp_type": "cg",
+               "pc_type": "jacobi",
+               "pc_hypre_type": "pilut"}
+    
+    # EXAMPLE DUAL SOLVE METHODS
     sp_star = {"snes_type": "ksponly",
-            "ksp_type": "cg",
-            "ksp_rtol": 1.0e-10,
-            "ksp_max_it": 20,
-            "ksp_convergence_test": "skip",
-            "ksp_monitor": None,
-            "pc_type": "python",
-            "pc_python_type": "firedrake.ASMStarPC",
-            "pc_star_mat_ordering_type": "metisnd",
-            "pc_star_sub_sub_pc_type": "cholesky"
-            }
+        "ksp_type": "cg",
+        "ksp_rtol": 1.0e-10,
+        "ksp_max_it": 20,
+        "ksp_convergence_test": "skip",
+        "ksp_monitor": None,
+        "pc_type": "python",
+        "pc_python_type": "firedrake.ASMStarPC",
+        "pc_star_mat_ordering_type": "metisnd",
+        "pc_star_sub_sub_pc_type": "cholesky"
+        }
     sp_vanka = {"snes_type": "ksponly",
             "ksp_type": "gmres",
             "ksp_rtol": 1.0e-10,
@@ -73,35 +52,5 @@ class SolverCtx:
             "pc_vanka_sub_sub_pc_type": "cholesky",
             "pc_vanka_construct_dim": 0
             }
-    sp_residual = {"snes_type": "ksponly",
-            "ksp_type": "preonly",
-            "pc_type": "hypre",
-            "pc_hypre_type": "pilut"} # Maybe now defunct
-    sp_cell     = {"mat_type": "matfree",
-               "snes_type": "ksponly",
-               "ksp_type": "preonly",
-               "pc_type": "python",
-               "pc_python_type": "firedrake.PatchPC",
-               "patch_pc_patch_save_operators": True,
-               "patch_pc_patch_construct_type": "vanka",
-               "patch_pc_patch_construct_codim": 0,
-               "patch_pc_patch_sub_mat_type": "seqdense",
-               "patch_sub_ksp_type": "preonly",
-               "patch_sub_pc_type": "lu",
-              }
-    sp_cell2   = {"mat_type": "matfree",
-               "snes_type": "ksponly",
-               "ksp_type": "cg",
-               "pc_type": "jacobi",
-               "pc_hypre_type": "pilut"}
-    sp_facet1    = {"mat_type": "matfree",
-               "snes_type": "ksponly",
-               "ksp_type": "cg",
-               "pc_type": "jacobi",
-               "pc_hypre_type": "pilut"}
-    sp_facet2    = {"snes_type": "ksponly",
-               "ksp_type": "preonly",
-               "pc_type": "hypre",
-               "pc_hypre_type": "pilut"}
-    sp_etaT = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
-    sp_newton = {"snes_linesearch-type": "l2"}
+    sp_chol = {"pc_type": "cholesky",
+            "pc_factor_mat_solver_type": "mumps"}

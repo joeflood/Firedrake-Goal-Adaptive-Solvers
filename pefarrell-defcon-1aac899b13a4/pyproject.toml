@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "defcon"
+version = "1.0"
+dependencies = [
+  "vtk",
+]
+authors = [
+  {name = "Patrick Farrell", email = "patrick.farrell@maths.ox.ac.uk"},
+]
+description="Deflated Continuation algorithm of Farrell, Beentjes and Birkisson"
+readme = "README.md"
+license = "LGPL-3.0-or-later"
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python",
+  "Programming Language :: C++",
+  "Topic :: Scientific/Engineering :: Mathematics",
+]
+
+[project.urls]
+Repository = "http://bitbucket.com/pefarrell/defcon"

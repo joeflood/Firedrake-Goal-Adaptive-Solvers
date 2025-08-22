@@ -31,19 +31,10 @@ mesh = Mesh(ngmesh)
 
 # Define solver parameters ---------------------
 solver_parameters = {
-    "degree": 1,
-    "dual_solve_method": "high_order",
-    "dual_solve_degree": "degree + 1",
-    "residual_solve_method": "automatic",
-    "residual_degree": "degree",
-    "dorfler_alpha": 0.5,
-    "goal_tolerance": 0.00001,
-    "max_iterations": 10,
-    "output_dir": "output/navierstokes",
-    "parameter_init": 20,
-    "parameter_final": 0.02,
-    "parameter_iterations": 10,
-    "write_at_iteration": True
+    "max_iterations": 20,
+    "output_dir": "output/conv-diff-new",
+    #"uniform_refinement": True
+    #"use_adjoint_residual": True
 }
 
 # Define actual problem -----------------------
@@ -66,7 +57,7 @@ p_inflow = 1
 p_outflow = 0
 n = FacetNormal(mesh)
 
-labels = getlabels(mesh)
+labels = getlabels(mesh, 1)
 ds_outflow = Measure("ds", domain=mesh, subdomain_id=labels['outflow'])
 ds_inflow = Measure("ds", domain=mesh, subdomain_id=labels['inflow'])
 

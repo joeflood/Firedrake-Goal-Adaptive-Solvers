@@ -49,35 +49,24 @@ n = FacetNormal(mesh)
 # --- NEW: nonlinear diffusivity a(|∇u|) ---
 def a(q):        # q is a vector
     return (eps + inner(q, q))**((p-2)/2)
-g = dot(G , n)                                  # natural (Neumann) flux n·(a∇u)
-f = -div(G ) + reaction(u_exact)                # RHS so that u_exact is the solution
+g = dot( a(G)*G , n)                                  # natural (Neumann) flux n·(a∇u)
+f = -div( a(G)*G ) + reaction(u_exact)                # RHS so that u_exact is the solution
 
 labels = boundary_labels(mesh)
 ds_neumann = Measure("ds", domain=mesh, subdomain_id=labels['neumannbc'])
 ds_dirichlet = Measure("ds", domain=mesh, subdomain_id=labels['dirichletbc'])
-names = mesh.netgen_mesh.GetRegionNames(codim=0)
-name_to_id = {name: i+1 for i, name in enumerate(names)}
-ROI = name_to_id["roi"]
-dx_goal = Measure("dx", domain=mesh, subdomain_id=ROI)
 
-F = inner(grad(u), grad(v) )*dx + reaction(u)*v*dx- inner(f, v)*dx - g*v*ds_neumann
+F = inner( a(grad(u))*grad(u), grad(v) )*dx + reaction(u)*v*dx- inner(f, v)*dx - g*v*ds_neumann
 bcs = [DirichletBC(V, u_exact, labels['dirichletbc'])]
 
-J = u * dx_goal
+J = u * ds_neumann
 
 # Define solver parameters ---------------------
 solver_parameters = {
-    "degree": 1,
-    "dual_solve_method": "high_order",
-    "dual_solve_degree": "degree + 3",
-    "residual_solve_method": "automatic",
-    "residual_degree": "degree",
-    "dorfler_alpha": 0.5,
-    "goal_tolerance": 0.000001,
     "max_iterations": 20,
-    "output_dir": "output/nonlinear",
-    "write_at_iteration": True,
-    #"residual": "both"
+    "output_dir": "output/conv-diff-new",
+    #"uniform_refinement": True
+    #"use_adjoint_residual": True
 }
 
 # # Define actual problem -----------------------

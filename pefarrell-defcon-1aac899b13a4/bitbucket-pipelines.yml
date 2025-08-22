@@ -1,0 +1,34 @@
+image: firedrakeproject/firedrake-vanilla-default
+
+test: &test
+  step:
+    name: Run the unit tests
+    max-time: 30
+    script:
+      - python3 -m pip install pybadges pytest-timeout
+      - python3 -m pybadges --left-text=pipelines --right-text=failure --right-color='#c00' > status.svg
+      - cd $BITBUCKET_CLONE_DIR
+      - python3 -m pip install .
+      - mpiexec -n 2 python3 -m pytest -v -s --timeout=600 --timeout-method=thread -o faulthandler_timeout=660 defcon/ examples/firedrake/
+      - cd -
+      - python3 -m pybadges --left-text=pipelines --right-text=success --right-color='#0c0' > status.svg
+    artifacts:
+      - status.svg
+
+upload-badge: &upload-badge
+  step:
+    name: Upload the build status
+    script:
+      - pipe: atlassian/bitbucket-upload-file:0.3.4
+        variables:
+          BITBUCKET_USERNAME: $BITBUCKET_USERNAME
+          BITBUCKET_APP_PASSWORD: $BITBUCKET_APP_PASSWORD
+          FILENAME: 'status.svg'
+
+pipelines:
+  default:
+    - <<: *test
+  branches:
+    master:
+    - <<: *test
+    - <<: *upload-badge

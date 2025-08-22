@@ -191,7 +191,7 @@ class GoalAdaptiveEigenSolver():
 
         
         assemble(Lc)
-        solve(ac == Lc, Rcell, solver_parameters=s.sp_cell2) # solve for Rcell polynonmial
+        solve(ac == Lc, Rcell, solver_parameters=s.sp_cell) # solve for Rcell polynonmial
 
         def both(u):
             return u("+") + u("-")
@@ -214,7 +214,7 @@ class GoalAdaptiveEigenSolver():
         ndofs = Q.dim()
         print("Rhat dofs:" , ndofs)
         print("Computing Rfacets ...")
-        solve(af == Lf, Rhat, solver_parameters=s.sp_facet1)
+        solve(af == Lf, Rhat, solver_parameters=s.sp_facet)
         Rfacet = Rhat/cones
 
         # 8. Compute error indicators eta_T 

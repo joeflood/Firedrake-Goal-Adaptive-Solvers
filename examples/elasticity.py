@@ -10,15 +10,10 @@ degree = 1
 
 # Define solver parameters ---------------------
 solver_parameters = {
-    "degree": 1,
-    "dual_solve_method": "high_order",
-    "dual_solve_degree": "degree + 1",
-    "residual_solve_method": "automatic",
-    "residual_degree": "degree",
-    "dorfler_alpha": 0.5,
-    "max_iterations": 10,
-    "output_dir": "output/elasticity",
-    "write_at_iteration": True
+    "max_iterations": 20,
+    "output_dir": "output/conv-diff-new",
+    #"uniform_refinement": True
+    #"use_adjoint_residual": True
 }
 
 # Define actual problem -----------------------
@@ -79,6 +74,7 @@ bcs = []
 psi = y * (y-1)
 M = inner(dot(sigma, n), as_vector([0, psi]))*ds(2)
 tolerance = 0.00001
+
 
 problem = NonlinearVariationalProblem(F, t, bcs)
 

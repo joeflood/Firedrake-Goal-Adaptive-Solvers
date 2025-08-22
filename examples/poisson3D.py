@@ -29,16 +29,10 @@ mesh = Mesh(ngmesh)
 
 # Define solver parameters ---------------------
 solver_parameters = {
-    "degree": 1,
-    #"dual_solve_method": "star",
-    "dual_solve_degree": "degree + 1",
-    "residual_solve_method": "automatic",
-    "residual_degree": "degree",
-    "dorfler_alpha": 0.5,
-    "max_iterations": 30,
-    "output_dir": "output/poisson3d",
-    "write_at_iteration": True,
-    "exact_indicators": True
+    "max_iterations": 20,
+    "output_dir": "output/conv-diff-new",
+    #"uniform_refinement": True
+    #"use_adjoint_residual": True
 }
 
 degree = 1
@@ -52,7 +46,7 @@ G = as_vector(((y-1)**2, 2*(x-1)*(y-1), 0.0))
 g = dot(G,n)
 f = -div(grad(u_exact))
 
-labels = getlabels(mesh)
+labels = getlabels(mesh, 1)
 ds_goal = Measure("ds", domain=mesh, subdomain_id=labels['goal_face'])
 dxm     = Measure("dx", domain=mesh)
 ds_neumann     = Measure("ds", domain=mesh, subdomain_id=labels['neumannbcs']+labels['goal_face'])

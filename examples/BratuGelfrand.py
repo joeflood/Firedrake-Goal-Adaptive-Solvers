@@ -65,18 +65,10 @@ J = u * dx_goal
 
 # Define solver parameters ---------------------
 solver_parameters = {
-    "degree": 1,
-    #"dual_solve_method": "star",
-    "dual_solve_degree": "degree + 1",
-    "residual_solve_method": "automatic",
-    "residual_degree": "degree",
-    "dorfler_alpha": 0.5,
-    "goal_tolerance": 0.000001,
     "max_iterations": 20,
-    "output_dir": "output/nonlinear",
-    "write_at_iteration": True,
-    #"residual": "both",
-    #"exact_indicators": True
+    "output_dir": "output/conv-diff-new",
+    #"uniform_refinement": True
+    #"use_adjoint_residual": True
 }
 
 # # Define actual problem -----------------------

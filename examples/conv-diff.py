@@ -42,16 +42,10 @@ labels = boundary_labels(mesh)
 
 # Define solver parameters ---------------------
 solver_parameters = {
-    "degree": 1,
-    "dual_solve_method": "high_order",
-    "dual_solve_degree": "degree + 1",
-    "residual_solve_method": "automatic",
-    "residual_degree": "degree",
-    "dorfler_alpha": 0.5,
     "max_iterations": 20,
-    "output_dir": "output/conv-diff-both",
-    "write_at_iteration": True,
-    #"residual": "both"
+    "output_dir": "output/conv-diff-new",
+    #"uniform_refinement": True
+    #"use_adjoint_residual": True
 }
 
 degree = 1

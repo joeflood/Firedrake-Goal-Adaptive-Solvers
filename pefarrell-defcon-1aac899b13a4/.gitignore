@@ -1,0 +1,19 @@
+*.pyc
+
+# Output of deflation-continuation
+*.pdf
+*.h5
+*.pck
+*.json
+journal.txt
+
+# Output of GUI
+*.pvd
+*.vtu
+*.mp4
+*.tex
+
+__pycache__
+.cache
+
+/defcon.egg-info/
