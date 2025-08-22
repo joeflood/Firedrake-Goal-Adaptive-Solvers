@@ -466,9 +466,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
         v = F.arguments()[0]
         return replace(F, {v: test})
 
-def getlabels(mesh): # Doesn't seem to work in 2D ?
+def getlabels(mesh, codim): # Doesn't seem to work in 2D ?
     ngmesh = mesh.netgen_mesh
-    names = ngmesh.GetRegionNames(codim=1)
+    names = ngmesh.GetRegionNames(codim=codim)
     names_to_labels = {}
     for l in names:
         names_to_labels[l] = tuple(i+1 for i, name in enumerate(names) if name == l)
