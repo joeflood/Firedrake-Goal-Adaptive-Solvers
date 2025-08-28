@@ -30,7 +30,7 @@ ncheck = 80
 residual_degree = 1
 
 # Specific eigenvalue target
-m_t, n_t = 3, 4
+m_t, n_t = 6, 6
 target = float(np.pi**2 * (m_t*m_t + n_t*n_t))
 
 # Exact eigs
@@ -82,19 +82,22 @@ solver_parameters1 = {  "eps_gen_hermitian": None,
                         "eps_tol": 1e-12
                         }
 
-solver_parameters_target = {"eps_gen_hermitian": None,
-                            "eps_which": "target_magnitude",
-                            "eps_target": target,
-                            "st_type": "sinvert",
-                            "st_ksp_type": "preonly",
-                            "st_pc_type": "lu",                          # works out of the box; switch to hypre/gamg if you prefer
-                            "st_pc_factor_mat_solver_type": "mumps",     # optional but fast/robust if available
-                            "eps_tol": 1e-12,
+solver_parameters_target1 = {"eps_gen_hermitian": None,
+    "eps_which": "target_magnitude",
+    "eps_target": target,
+    "eps_tol": 1e-10,
+                          }
+
+solver_parameters_target2 = {"eps_gen_hermitian": None,
+    "st_type": "sinvert",
+    "st_shift": target,                 # <— crucial
+    "eps_which": "largest_magnitude",   # in transformed spectrum ⇒ nearest to st_shift
+    "eps_tol": 1e-10,
                           }
 
 # --- solve once per space ---
-lam_h,  Vp_vecs  = solve_eigs(A, M, V, bcs, nev=nev, solver_parameters=solver_parameters1)
-lam_hp1, Vp1_vecs = solve_eigs(Ap1, Mp1, Vp1, bcs_p1, nev=nev, solver_parameters=solver_parameters1)
+lam_h,  Vp_vecs  = solve_eigs(A, M, V, bcs, nev=nev, solver_parameters=solver_parameters_target1)
+lam_hp1, Vp1_vecs = solve_eigs(Ap1, Mp1, Vp1, bcs_p1, nev=nev, solver_parameters=solver_parameters_target1)
 
 def both(u):
     return u("+") + u("-")
@@ -172,52 +175,57 @@ def automatic_error_indicators(z_err, F):
     )
     return etaT
 
-
-def run_block(title, ncheck, v_provider, phi_provider):
+def run_compute(title, ncheck):
     """
-    v_provider(m,n) -> Function in Vd (L2-normalized)
-    phi_provider(v_source) -> UFL (symbolic) or Function in V
+    Compare computed eigenpairs with the higher-order (p+1) computed eigenfunctions.
     """
     print(title)
-    print("\n# k  (m,n)     sigma_h     error_exact     error_predicted     effectivity1     sum(local errors)     effectivity2")
+    print("\n# k  (m,n)     sigma_h     error_exact     error_predicted     "
+          "effectivity1     sum(local errors)     effectivity2")
 
-    used_p = set()   # track which discrete V-vectors we’ve used
+    used_p1 = set()
     rows = []
+
     for k, (lam_exact, m, n) in enumerate(exact_list[:ncheck], start=1):
-        v_exact = Function(V_exact) 
-        v_exact.interpolate(exact_expr(m, n)) 
-        l2_normalize(v_exact)
-        # choose v (exact or p+1) and match a V-eigenvector to it
-        v_matched = v_provider(m, n, v_exact)              # Function in Vd
-        idx_p, v_h = best_match(v_matched, Vp_vecs, used_p)
+        # --- exact analytic reference ---
+        v_ref = Function(V_exact)
+        v_ref.interpolate(exact_expr(m, n))
+        l2_normalize(v_ref)
+
+        # --- pick best matching eigenfunction from Vp1 ---
+        _, v_used = best_match(v_ref, Vp1_vecs, used_p1)
+
+        # match to V eigenfunction
+        idx_p, v_h = best_match(v_used, Vp_vecs, set())
         lamh = lam_h[idx_p]
-        
-        # build phi_h in V
-        phi_h = phi_provider(v_matched)
 
-        e = Function(V_exact)
-        e.interpolate(v_matched - v_h)
+        # symbolic interpolation into V
+        phi_h = Function(V)
+        phi_h.interpolate(v_used)
+        #phi_h = l2_normalize(phi_h)
+
+        #print("v_h norm:", assemble(inner(v_h, v_h)*dx)**0.5)
+        #print("phi_h norm:", assemble(inner(phi_h, phi_h)*dx)**0.5)
+        #print("v_used norm:", assemble(inner(v_used, v_used)*dx)**0.5)
+        # continue with error analysis (same code as before)
+        e = v_used - v_h
         sigma_h = 0.5 * assemble(inner(e, e) * dx)
-        denom = 1.0 - sigma_h
-
-        # -------------------- Error prediction --------------------
-        rhs = assemble(inner(grad(v_h), grad(v_matched - phi_h)) * dx) \
-              - lamh * assemble(inner(v_h, (v_matched - phi_h)) * dx)
+        e = v_used - phi_h
+        rhs = assemble(inner(grad(v_h), grad(e)) * dx) \
+              - lamh * assemble(inner(v_h, e) * dx)
 
         error_exact = abs(lam_exact - lamh)
-        
+        denom = 1.0 - sigma_h
         error_pred = abs(rhs / denom) if abs(denom) > 1e-14 else float("nan")
-        
-        # Effectivity
-        effectivity = abs(error_exact - error_pred) / error_exact
+        diff = abs(error_exact - error_pred)
+        effectivity = error_pred / error_exact
         rows.append((k, m, n, error_exact, error_pred, diff))
-       
+
         # -------------------- Error indicators --------------------
         # Manual
         n_f = FacetNormal(mesh)
         DG0 = FunctionSpace(mesh, "DG", degree=0)
         test = TestFunction(DG0)
-        w = v_matched - phi_h
         # eta_T = assemble(
         #             inner(div(grad(v_h)), w * test) * dx - 
         #         lamh * inner(v_h,w * test) * dx + 
@@ -225,9 +233,9 @@ def run_block(title, ncheck, v_provider, phi_provider):
         #         inner(dot(-grad(v_h), n_f), w * test) * ds
         # )
         eta_T = assemble(
-             inner(div(grad(v_h)), w * test) * dx +
-            (-lamh * v_h * w) * test * dx + (jump(grad(v_h), n_f) * w) * 0.5*both(test) * dS
-             + inner(dot(-grad(v_h), n_f), w * test) * ds
+             inner(div(grad(v_h)), e * test) * dx +
+            (-lamh * v_h * e) * test * dx + (jump(grad(v_h), n_f) * e) * 0.5*both(test) * dS
+             + inner(dot(-grad(v_h), n_f), e * test) * ds
         )
 
         # Compute effectivity
@@ -241,7 +249,7 @@ def run_block(title, ncheck, v_provider, phi_provider):
         # Automatic
         v = TestFunction(V)
         form = inner(grad(v_h), grad(v)) * dx - lamh * inner(v_h, (v)) * dx
-        eta_T_automatic = automatic_error_indicators(w, form)
+        eta_T_automatic = automatic_error_indicators(e, form)
 
         # Compute effectivity
         with eta_T_automatic.dat.vec_ro as v:         # read-only PETSc Vec
@@ -255,31 +263,4 @@ def run_block(title, ncheck, v_provider, phi_provider):
 
     return rows
 
-# --- block 1: exact v ---
-def v_provider_exact(m, n, _vref):
-    v = Function(V_exact)
-    v.interpolate(exact_expr(m, n))
-    return l2_normalize(v)
-
-def phi_provider_exact(v_used):
-    # nodal interpolant into V (method form is fine; no FutureWarning)
-    phi = Function(V)
-    phi.interpolate(v_used); return phi
-
-rows_exact = run_block("Using exact v:", ncheck=ncheck,
-                       v_provider=v_provider_exact,
-                       phi_provider=phi_provider_exact)
-
-# --- block 2: v from CG(p+1) ---
-used_p1 = set()
-def v_provider_p1(_m, _n, vref):
-    # match the p+1 eigenfunction to the analytic reference
-    _, v_hp1 = best_match(vref, Vp1_vecs, used_p1)
-    return v_hp1  # already normalized
-def phi_provider_p1(v_used):
-    # symbolic interpolate is fine in forms; if you prefer a Function, wrap with assemble(...)
-    return interp(v_used, V)
-
-rows_p1 = run_block("Approximating v in CG(p+1):", ncheck=ncheck,
-                    v_provider=v_provider_p1,
-                    phi_provider=phi_provider_p1)
+rows_p1 = run_compute("Approximating v in CG(p+1):", ncheck=ncheck)

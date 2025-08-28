@@ -3,21 +3,24 @@ from netgen.occ import *
 from dataclasses import dataclass, field
 from functools import cached_property
 
-class SolverCtx:
+class EigenSolverCtx:
     def __init__(self, config: dict):
         self.manual_indicators = config.get("manual_indicators", False) # Used for manual indicators (only implemented for Poisson but could be overriden)
         self.dorfler_alpha = config.get("dorfler_alpha", 0.5) # Dorfler marking parameter, default 0.5
         self.max_iterations = config.get("max_iterations", 10)
-        self.output_dir = config.get("output_dir", "./output")
         self.dual_extra_degree = config.get("dual_extra_degree", 1)
         self.cell_residual_extra_degree = config.get("cell_residual_extra_degree", 0)
         self.facet_residual_extra_degree = config.get("facet_residual_extra_degree", 0)
-        self.write_at_iteration = config.get("write_at_iteration", True)
-        self.use_adjoint_residual = config.get("use_adjoint_residual", False) # For switching between primal and primal + adjoint residuals
-        self.exact_indicators = config.get("exact_indicators", False) # Maybe remove
+        
+        self.self_adjoint = config.get("self_adjoint", False)
+        #self.exact_indicators = config.get("exact_indicators", False) # Maybe remove
         self.uniform_refinement = config.get("uniform_refinement", False)
-        self.primal_low_method = config.get("primal_low_method", "interpolate")
-        self.dual_low_method = config.get("dual_low_method", "interpolate")
+        self.nev = config.get("nev", 5)
+        self.cluster = config.get("cluster_number", None)
+        self.cluster_tolerance = config.get("cluster_tolerance", 0.0001)
+        
+        # Write parameters
+        self.write_at_iteration = config.get("write_at_iteration", True)
         self.write_mesh = config.get("write_mesh", "all") # Default all, options: "first_and_last" "by iteration" "none"
         self.write_mesh_iteration_vector = config.get("write_iteration_vector", [])
         self.write_mesh_iteration_interval = config.get("write_iteration_interval", 1)
@@ -25,7 +28,8 @@ class SolverCtx:
         self.write_solution_iteration_vector = config.get("write_iteration_vector", [])
         self.write_solution_iteration_interval = config.get("write_solution", "all") # Default all, options: "first_and_last" "by iteration" "none"
         self.results_file_name = config.get("results_file_name", None)
-        self.nev = config.get("nev", 5)
+        self.output_dir = config.get("output_dir", "./output")
+        
     
     # Solver parameters
     sp_cell   = {"mat_type": "matfree",

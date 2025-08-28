@@ -1,6 +1,6 @@
 from firedrake import *
 
-degree = 2
+degree = 5
 mesh = UnitTriangleMesh()
 
 nx = 3

@@ -172,52 +172,56 @@ def automatic_error_indicators(z_err, F):
     )
     return etaT
 
-
-def run_block(title, ncheck, v_provider, phi_provider):
+def run_exact(title, ncheck):
     """
-    v_provider(m,n) -> Function in Vd (L2-normalized)
-    phi_provider(v_source) -> UFL (symbolic) or Function in V
+    Compare computed eigenpairs with the exact analytic eigenfunctions.
     """
     print(title)
-    print("\n# k  (m,n)     sigma_h     error_exact     error_predicted     effectivity1     sum(local errors)     effectivity2")
+    print("\n# k  (m,n)   sigma_h     error_exact      error_predicted  "
+          "effectivity1  sum(local errors)   effectivity2")
 
-    used_p = set()   # track which discrete V-vectors we’ve used
+    used_p = set()
     rows = []
+
     for k, (lam_exact, m, n) in enumerate(exact_list[:ncheck], start=1):
-        v_exact = Function(V_exact) 
-        v_exact.interpolate(exact_expr(m, n)) 
-        l2_normalize(v_exact)
-        # choose v (exact or p+1) and match a V-eigenvector to it
-        v_matched = v_provider(m, n, v_exact)              # Function in Vd
-        idx_p, v_h = best_match(v_matched, Vp_vecs, used_p)
+        # --- exact reference eigenfunction in V_exact ---
+        v_ref = Function(V_exact)
+        v_ref.interpolate(exact_expr(m, n))
+        l2_normalize(v_ref)
+
+        # --- use exact eigenfunction as v_used ---
+        v_used = v_ref
+
+        # match a discrete eigenfunction in V
+        idx_p, v_h = best_match(v_used, Vp_vecs, used_p)
         lamh = lam_h[idx_p]
-        
-        # build phi_h in V
-        phi_h = phi_provider(v_matched)
 
-        e = Function(V_exact)
-        e.interpolate(v_matched - v_h)
+        # interpolate exact function into V
+        phi_h = Function(V)
+        phi_h.interpolate(v_used)
+
+
+        # continue with error analysis (same code as before)
+        # ------------------------------------------------
+        e = Function(V_exact); e.interpolate(v_used - v_h)
         sigma_h = 0.5 * assemble(inner(e, e) * dx)
-        denom = 1.0 - sigma_h
 
-        # -------------------- Error prediction --------------------
-        rhs = assemble(inner(grad(v_h), grad(v_matched - phi_h)) * dx) \
-              - lamh * assemble(inner(v_h, (v_matched - phi_h)) * dx)
+        rhs = assemble(inner(grad(v_h), grad(v_used - phi_h)) * dx) \
+              - lamh * assemble(inner(v_h, (v_used - phi_h)) * dx)
 
         error_exact = abs(lam_exact - lamh)
-        
+        denom = 1.0 - sigma_h
         error_pred = abs(rhs / denom) if abs(denom) > 1e-14 else float("nan")
-        
-        # Effectivity
-        effectivity = abs(error_exact - error_pred) / error_exact
+        diff = abs(error_exact - error_pred)
+        effectivity = error_pred / error_exact
         rows.append((k, m, n, error_exact, error_pred, diff))
-       
+
         # -------------------- Error indicators --------------------
         # Manual
         n_f = FacetNormal(mesh)
         DG0 = FunctionSpace(mesh, "DG", degree=0)
         test = TestFunction(DG0)
-        w = v_matched - phi_h
+        w = v_used - phi_h
         # eta_T = assemble(
         #             inner(div(grad(v_h)), w * test) * dx - 
         #         lamh * inner(v_h,w * test) * dx + 
@@ -255,31 +259,4 @@ def run_block(title, ncheck, v_provider, phi_provider):
 
     return rows
 
-# --- block 1: exact v ---
-def v_provider_exact(m, n, _vref):
-    v = Function(V_exact)
-    v.interpolate(exact_expr(m, n))
-    return l2_normalize(v)
-
-def phi_provider_exact(v_used):
-    # nodal interpolant into V (method form is fine; no FutureWarning)
-    phi = Function(V)
-    phi.interpolate(v_used); return phi
-
-rows_exact = run_block("Using exact v:", ncheck=ncheck,
-                       v_provider=v_provider_exact,
-                       phi_provider=phi_provider_exact)
-
-# --- block 2: v from CG(p+1) ---
-used_p1 = set()
-def v_provider_p1(_m, _n, vref):
-    # match the p+1 eigenfunction to the analytic reference
-    _, v_hp1 = best_match(vref, Vp1_vecs, used_p1)
-    return v_hp1  # already normalized
-def phi_provider_p1(v_used):
-    # symbolic interpolate is fine in forms; if you prefer a Function, wrap with assemble(...)
-    return interp(v_used, V)
-
-rows_p1 = run_block("Approximating v in CG(p+1):", ncheck=ncheck,
-                    v_provider=v_provider_p1,
-                    phi_provider=phi_provider_p1)
+rows_exact = run_exact("Using exact v:", ncheck=ncheck)
