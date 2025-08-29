@@ -43,7 +43,7 @@ mesh = Mesh(unit_square.GenerateMesh(maxh=1/nx))
 V  = FunctionSpace(mesh, "CG", degree)
 u  = TrialFunction(V); v = TestFunction(V)
 A  = inner(grad(u), grad(v)) * dx
-M  = inner(u, v) * dx
+M  = inner(u,v) * dx
 bcs = [DirichletBC(V, 0.0, "on_boundary")]
 A_adj = adjoint(A)
 
@@ -146,7 +146,7 @@ def match_best(target, candidates, lambdas=None):
     
 def lambda_max_discrete():
     params = {
-        "eps_gen_hermitian": None,
+        #"eps_gen_hermitian": None,
     }
     lam, _ = solve_eigs(A, M, bcs, nev=2, solver_parameters=params)
     return lam

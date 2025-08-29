@@ -1,8 +1,7 @@
 from firedrake import *
 from netgen.occ import *
 import sys
-from goaladadaptiveeigensolver import GoalAdaptiveEigenSolver
-from ufl import conj
+from goaladadaptiveeigensolver_complex import GoalAdaptiveEigenSolverComplex
 
 # User knobs
 #nx = 20
@@ -38,15 +37,12 @@ tolerance = 0.001
 solver_parameters = {
     "max_iterations": 10,
     "output_dir": "output/maxwell_eig6",
-    "manual_indicators": False,
     "dual_extra_degree": 1,
-    "use_adjoint_residual": True,
-    "primal_low_method": "interpolate",
-    "dual_low_method": "interpolate",
+    #"self_adjoint": True
     #"uniform_refinement": True
     #"use_adjoint_residual": True
 }
 
 problem = LinearEigenproblem(A,M,bcs)
-solver = GoalAdaptiveEigenSolver(problem, target, tolerance, solver_parameters=solver_parameters, exact_solution=target)
+solver = GoalAdaptiveEigenSolverComplex(problem, target, tolerance, solver_parameters=solver_parameters, exact_solution=target)
 solver.solve()

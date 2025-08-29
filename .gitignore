@@ -1,3 +1,4 @@
 # Ignore outputs
 output/*
 __pycache__/
+utility_plots/output/
