@@ -47,7 +47,15 @@ target = 52.3446911  # first Stokes/buckling eigenvalue on unit square (referenc
 nev = 5
 tolerance = 0.00001
 
+solver_parameters = {
+    "max_iterations": 30,
+    "output_dir": "output_eigenproblems/stokes/eig1",
+    "dual_extra_degree": 1,
+    "self_adjoint": True
+    #"uniform_refinement": True
+    #"use_adjoint_residual": True
+}
 
 problem = LinearEigenproblem(A,M,bcs)
-solver = GoalAdaptiveEigenSolverComplex(problem, target, tolerance, solver_parameters={"self_adjoint": True}, exact_solution=target)
+solver = GoalAdaptiveEigenSolverComplex(problem, target, tolerance, solver_parameters=solver_parameters, exact_solution=target)
 solver.solve()

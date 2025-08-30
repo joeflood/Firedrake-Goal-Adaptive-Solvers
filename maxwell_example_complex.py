@@ -28,17 +28,21 @@ A  = inner(curl(u), curl(v)) * dx
 M  = inner(u, v) * dx
 bcs = [DirichletBC(V, Constant((0.0, 0.0)), "on_boundary")]
 
-# Pick a target by (m,n) OR set 'target' directly to a float
-m_t, n_t = 1, 1
-target = 12.5723873200  # override this with a number if you like
+#target = 12.5723873200 
+target = 23.344371957137 # 9th eigenvalue
+#target = 21.4247335393 # 8th eigenvalue
+#target = 1.47562182397 # 1st eigenvalue
+target = pi**2 # 3rd and 4th eigenvalue
+
 print("Target eigenvaue: ", target)
-tolerance = 0.001
+tolerance = 0.00001
 
 solver_parameters = {
-    "max_iterations": 10,
-    "output_dir": "output/maxwell_eig6",
+    "max_iterations": 30,
+    "output_dir": "output_eigenproblems/maxwell/eig3and4_mag",
     "dual_extra_degree": 1,
-    #"self_adjoint": True
+    "self_adjoint": True,
+    "dorfler_alpha": 0.5
     #"uniform_refinement": True
     #"use_adjoint_residual": True
 }
