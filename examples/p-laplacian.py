@@ -63,26 +63,12 @@ J = u * ds_neumann
 
 # Define solver parameters ---------------------
 solver_parameters = {
-    "max_iterations": 20,
-    "output_dir": "output/conv-diff-new",
+    "max_iterations": 30,
+    "output_dir": "output",
     #"uniform_refinement": True
     #"use_adjoint_residual": True
 }
 
-# # Define actual problem -----------------------
-# n = FacetNormal(mesh)
-# V = FunctionSpace(mesh, "CG", degree) # Template function space used to define the PDE
-# print("DOF = ", V.dim())
-# u = Function(V, name="Solution")
-# v = TestFunction(V)
-# (x, y) = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
-# u_exact = x*y**2
-# f = -div(grad(u_exact))
-
-# F = inner(grad(u), grad(v))*dx - inner(f, v)*dx
-# bcs = [DirichletBC(V, u_exact, "on_boundary")]
-
-# J = u * dx
 tolerance = 0.000001
 
 problem = NonlinearVariationalProblem(F, u, bcs)

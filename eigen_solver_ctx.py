@@ -15,7 +15,7 @@ class EigenSolverCtx:
         self.self_adjoint = config.get("self_adjoint", False)
         #self.exact_indicators = config.get("exact_indicators", False) # Maybe remove
         self.uniform_refinement = config.get("uniform_refinement", False)
-        self.nev = config.get("nev", 5)
+        self.NEV_SOLVE = config.get("NEV_SOLVE", 5)
         self.cluster = config.get("cluster_number", None)
         self.cluster_tolerance = config.get("cluster_tolerance", 0.0001)
         
@@ -29,6 +29,7 @@ class EigenSolverCtx:
         self.write_solution_iteration_interval = config.get("write_solution", "all") # Default all, options: "first_and_last" "by iteration" "none"
         self.results_file_name = config.get("results_file_name", None)
         self.output_dir = config.get("output_dir", "./output")
+        self.run_name = config.get("run_name", None)
         
     
     # Solver parameters

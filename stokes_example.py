@@ -30,7 +30,7 @@ A = ( inner(grad(u), grad(v)) * dx
     + q*div(u) * dx )
 
 # Mass only on velocity (pressure part = 0)
-delta_p = Constant(1e-10)         # 1e-10..1e-6 is typical
+delta_p = Constant(1e-8)         # 1e-10..1e-6 is typical
 M = inner(u, v) * dx + delta_p * p * q * dx
 
 # No-slip
@@ -44,12 +44,13 @@ bcs = [DirichletBC(W.sub(0), Constant((0.0, 0.0)), "on_boundary")]
 target = 52.3446911  # first Stokes/buckling eigenvalue on unit square (reference) EXACT
 #target = 92
 
-nev = 5
-tolerance = 0.00001
+nev = 1
+tolerance = 0.0000001
 
-solver_parameters = {
+adaptive_parameters = {
     "max_iterations": 30,
-    "output_dir": "output_eigenproblems/stokes/eig1",
+    "run_name": "eig1",
+    "output_dir": "output_eigenproblems/stokes_new",
     "dual_extra_degree": 1,
     "self_adjoint": True
     #"uniform_refinement": True
@@ -57,5 +58,5 @@ solver_parameters = {
 }
 
 problem = LinearEigenproblem(A,M,bcs)
-solver = GoalAdaptiveEigenSolverComplex(problem, target, tolerance, solver_parameters=solver_parameters, exact_solution=target)
+solver = GoalAdaptiveEigenSolverComplex(problem, target, tolerance, adaptive_parameters=adaptive_parameters, exact_solution=target)
 solver.solve()

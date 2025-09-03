@@ -19,7 +19,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
     to the PDE.     
     '''
 
-    def __init__(self, problem: NonlinearVariationalProblem, goal_functional, tolerance: float,  solver_parameters: dict,*, primal_solver_parameters = None, dual_solver_parameters = None, exact_solution = None, exact_goal = None):
+    def __init__(self, problem: NonlinearVariationalProblem, goal_functional, tolerance: float,  solver_parameters: dict,
+                 *, primal_solver_parameters = None, dual_solver_parameters = None, exact_solution = None, exact_goal = None,
+                 nullspace = None):
         # User input vars
         self.problem = problem
         self.J = goal_functional
@@ -38,6 +40,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
         self.degree = self.element.degree()
         self.test = TestFunction(self.V)
         self.mesh = self.V.mesh()
+        self.nullspace = nullspace
 
         # Data storage and writing
         self.output_dir = Path(self.solverctx.output_dir)
@@ -55,13 +58,15 @@ class GoalAdaptiveNonlinearVariationalSolver():
         s = self.solverctx
         ndofs = self.V.dim()
         self.N_vec.append(ndofs)
+        nullspace = MixedVectorSpaceBasis(self.V, [self.V.sub(0), VectorSpaceBasis(constant=True)])
         def solve_uh():
             if self.sp_primal is None:
                 print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: Default nonlinear solve] ...")
-                NonlinearVariationalSolver(self.problem).solve()
+                NonlinearVariationalSolver(self.problem, nullspace=nullspace, transpose_nullspace=nullspace).solve()
             else:
                 print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: User defined] ...")
-                NonlinearVariationalSolver(self.problem, solver_parameters=self.sp_primal).solve()
+                NonlinearVariationalSolver(self.problem, solver_parameters=self.sp_primal, 
+                nullspace=nullspace, transpose_nullspace=nullspace).solve()
         
         if s.use_adjoint_residual == True:
             # Now solve in higher space
@@ -160,6 +165,29 @@ class GoalAdaptiveNonlinearVariationalSolver():
         Juh = assemble(self.J)
         print(f"{'Computed goal':45s}{'J(uh):':8s}{Juh:15.12f}")
 
+        Umax  = Constant(0.3)
+        Umean = 2*Umax/3            # 0.2
+        D     = Constant(0.10) 
+        scale = 2.0/(Umean**2*D)    # = 500
+        nu = 0.001
+        mesh = self.mesh
+        n = FacetNormal(mesh)
+        I   = Identity(2)
+        u, p = split(self.u)
+        e2 = as_vector([0.0, 1.0])
+        labels = getlabels(mesh,1)
+        ds_cyl  = ds(labels["cylinder"]) 
+        tau_v = 2*nu*sym(grad(u))
+        tau_p = -p*I
+        FL_v  = assemble(dot(tau_v*n, e2) * ds_cyl)
+        FL_p  = assemble(dot(tau_p*n, e2) * ds_cyl)
+        print("CL parts: visc =", float(scale*FL_v), "  pressure =", float(scale*FL_p))
+        #def peval(px, py):
+        #    return float(p.at([px, py], tolerance=1e-10))
+        #print("Δp ref check =", peval(0.15, 0.20) - peval(0.25, 0.20))
+
+        Juh = float(scale*FL_v) + float(scale*FL_p)
+        print("New computed goal: ", Juh)
         if self.u_exact is not None:
             quad_opts = {"quadrature_degree": 20}
             def as_mixed(exprs):
@@ -383,10 +411,10 @@ class GoalAdaptiveNonlinearVariationalSolver():
 
     def append_data(self, it):
         s = self.solverctx
-        if s.results_file_name is None:
+        if s.run_name is None:
             file_path = self.output_dir / "results.csv"
         else:
-            file_path = self.output_dir / s.results_file_name
+            file_path = self.output_dir / f"{s.run_name}/{s.run_name}_results.csv"
         if self.u_exact is None and self.solverctx.uniform_refinement == False:
             headers = ("iteration", "N", "Ndual", "eta_h", "sum_eta_T")
             row = (
@@ -440,7 +468,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
                     should_write = (it % interval == 0)  # includes it=0
         if should_write:
             print("Writing mesh ...")
-            VTKFile(self.output_dir / f"mesh{it}.pvd").write(self.mesh)
+            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}mesh{it}.pvd").write(self.mesh)
 
     def write_solution(self,it):
         s = self.solverctx
@@ -464,7 +492,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
                     should_write = (it % interval == 0)  # includes it=0
         if should_write:
             print("Writing (primal) solution ...")
-            VTKFile(self.output_dir / f"solution_{it}.pvd").write(*self.u.subfunctions)
+            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_solution_{it}.pvd").write(*self.u.subfunctions)
 
     def solve(self):
         s = self.solverctx

@@ -26,6 +26,7 @@ class SolverCtx:
         self.write_solution_iteration_interval = config.get("write_solution", "all") # Default all, options: "first_and_last" "by iteration" "none"
         self.results_file_name = config.get("results_file_name", None)
         self.nev = config.get("nev", 5)
+        self.run_name = config.get("run_name", None)
     
     # Solver parameters
     sp_cell   = {"mat_type": "matfree",

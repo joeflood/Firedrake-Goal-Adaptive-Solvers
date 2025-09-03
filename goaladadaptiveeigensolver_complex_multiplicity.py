@@ -11,7 +11,105 @@ from functools import singledispatch
 from firedrake.mg.ufl_utils import coarsen
 from adaptive import AdaptiveMeshHierarchy
 from adaptive_transfer_manager import AdaptiveTransferManager
+
+# --- Complex helpers (two-real representation) ------------------------------
+
 from dataclasses import dataclass
+
+@dataclass
+class CFun:
+    r: Function  # real part
+    i: Function  # imag part
+
+def c_from_pair(vr: Function, vi: Function | None) -> CFun:
+    if vi is None:
+        vi = Function(vr.function_space()); vi.assign(0)
+    return CFun(vr, vi)
+
+def c_copy(u: CFun) -> CFun:
+    ur = u.r.copy(deepcopy=True); ui = u.i.copy(deepcopy=True)
+    return CFun(ur, ui)
+
+def c_inner(u: CFun, v: CFun, Mform) -> complex:
+    # Hermitian M-inner product: <u,v>_M = re + i*im
+    def ip(a, b):  # <a,b>_M
+        return float(assemble(replace_both(Mform, b, a)))
+    re = ip(u.r, v.r) + ip(u.i, v.i)
+    im = ip(u.r, v.i) - ip(u.i, v.r)
+    return complex(re, im)
+
+def c_norm(u: CFun, Mform) -> float:
+    # ||u||_M = sqrt(<u,u>_M) ; imaginary part is ~0 numerically
+    val = c_inner(u, u, Mform).real
+    return (val if val > 0.0 else 0.0) ** 0.5
+
+def c_normalize(u: CFun, Mform) -> CFun:
+    n = c_norm(u, Mform)
+    if n > 0:
+        u.r.assign(u.r / n); u.i.assign(u.i / n)
+    return u
+
+def c_align(u: CFun, target: CFun, Mform) -> CFun:
+    # phase-align u s.t. <target,u>_M is real & positive
+    c = c_inner(target, u, Mform)
+    if c == 0:
+        return u
+    phase = c.conjugate() / abs(c)
+    ar, ai = phase.real, phase.imag
+    ur = Function(u.r.function_space()); ui = Function(u.r.function_space())
+    ur.assign(ar*u.r - ai*u.i)
+    ui.assign(ai*u.r + ar*u.i)
+    return CFun(ur, ui)
+
+def c_diff(a: CFun, b: CFun) -> CFun:  # a - b
+    ur = (a.r - b.r)
+    ui = (a.i - b.i)
+    return CFun(ur, ui)
+
+import numpy as np
+
+def gram_M(basis, Mform):
+    """G_ij = <u_i, u_j>_M (Hermitian)."""
+    m = len(basis)
+    G = np.empty((m, m), dtype=complex)
+    for i in range(m):
+        for j in range(i, m):
+            G[i, j] = c_inner(basis[i], basis[j], Mform)   # conjugate-linear in 1st arg
+            if i != j:
+                G[j, i] = np.conj(G[i, j])
+    return 0.5*(G + G.conj().T)  # symmetrize numerically
+
+def mix_basis(basis, C):
+    """Return v_j = sum_i C[i,j]*basis[i] for j=0..r-1."""
+    return [c_lincomb([C[i, j] for i in range(len(basis))], basis) for j in range(C.shape[1])]
+
+def orthonormalize_M(basis, Mform, rtol=1e-12):
+    """
+    Build U' = U C so that (U')^* M U' = I.
+    Fast path: Cholesky. Fallback: EVD with eigenvalue flooring for robustness.
+    """
+    if not basis:
+        return []
+    G = gram_M(basis, Mform)
+
+    # Try Cholesky (SPD expected if vectors are independent)
+    try:
+        R = np.linalg.cholesky(G)                 # G = R^* R
+        C = np.linalg.solve(R, np.eye(R.shape[0]))  # C = R^{-1}
+        Uo = mix_basis(basis, C)
+    except np.linalg.LinAlgError:
+        # Robust fallback: eigen-decompose and renormalize
+        w, V = np.linalg.eigh(G)                  # G = V diag(w) V^*
+        wmax = max(w.max(), 1.0)
+        w_floor = rtol * wmax
+        w_clamped = np.clip(w.real, w_floor, None)  # floor tiny/neg eigenvalues
+        C = V @ np.diag(1.0/np.sqrt(w_clamped)) @ V.conj().T
+        Uo = mix_basis(basis, C)
+
+    # (optional) sanity: make sure norms are 1
+    # You can re-scale each vector if you want strictly unit diagonal.
+    return Uo
+
 
 class GoalAdaptiveEigenSolverComplex():
     '''
@@ -19,17 +117,17 @@ class GoalAdaptiveEigenSolverComplex():
     to allow goal functionals of the eigenfunctions J(u).
     The 'goal' in this context is the ability to target a particular eigenvalue.    
     '''
-    def __init__(self, problem: LinearEigenproblem, target_eigenvalue: float, tolerance: float,  
-                 adaptive_parameters: dict,*, solver_parameters = None, exact_solution = None):
+
+    def __init__(self, problem: LinearEigenproblem, target_eigenvalue: float, tolerance: float,  solver_parameters: dict,*, primal_solver_parameters = None, exact_solution = None):
         # User input vars
         self.problem = problem
         self.target = target_eigenvalue
         self.tolerance = tolerance
-        self.sp_primal = solver_parameters
+        self.sp_primal = primal_solver_parameters
 
         self.lam_exact = exact_solution
-        self.solverctx = EigenSolverCtx(adaptive_parameters) # To store solver parameter data - Unnecessary, could remove in future.
-
+        self.solverctx = EigenSolverCtx(solver_parameters) # To store solver parameter data - Unnecessary, could remove in future.
+        
         # Derived vars
         self.V = problem.output_space
         self.bcs = problem.bcs
@@ -44,7 +142,6 @@ class GoalAdaptiveEigenSolverComplex():
         self.output_dir = Path(self.solverctx.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)  # ensures folder exists
         self.N_vec = []
-        self.N_high_vec = []
         self.eta_vec = []
         self.etah_vec = []
         self.etaTsum_vec = []
@@ -54,21 +151,16 @@ class GoalAdaptiveEigenSolverComplex():
 
     def solve_eigenproblems(self):
         s = self.solverctx
-        def solve_eigs(Aform, Mform, bcs, nev, solver_parameters, initial_space=None):
+        def solve_eigs(Aform, Mform, bcs, nev, solver_parameters):
             prob = LinearEigenproblem(Aform, Mform, bcs=bcs, restrict=True)
             es = LinearEigensolver(prob, n_evals=nev, solver_parameters=solver_parameters)
-
-            # --- try to access the underlying SLEPc.EPS and set the initial space
-            if initial_space:
-               es.set_initial_space(initial_space)
-            
             nconv = es.solve()
             lam, vecs = [], []
             for i in range(min(nconv, nev)):
                 lam.append(es.eigenvalue(i))
                 vr, vi = es.eigenfunction(i)
                 u = c_from_pair(vr, vi)
-                vecs.append(c_normalize(u, Mform)) 
+                vecs.append(c_normalize(u, Mform))
             return lam, vecs
 
         def match_best_complex(target: CFun, candidates: list[CFun], Mform, lambdas=None):
@@ -95,6 +187,8 @@ class GoalAdaptiveEigenSolverComplex():
 
             aligned = c_align(candidates[best_i], target, Mform)
             return (lam if lambdas is not None else best_i), aligned
+
+        
         
         if s.self_adjoint == True:
             solver_parameters_target = {
@@ -106,16 +200,11 @@ class GoalAdaptiveEigenSolverComplex():
                 "eps_target": self.target
             }
 
-        if self.sp_primal is not None:
-            solver_parameters = solver_parameters_target | self.sp_primal
-        else:
-            solver_parameters = solver_parameters_target
-
         A = self.A
         M = self.M
         self.A_adj = adjoint(self.A)
         bcs=self.bcs
-        NEV_SOLVE = self.solverctx.NEV_SOLVE
+        NEV_SOLVE = self.solverctx.nev
         print("Primal DOFs: ", self.V.dim())
         self.N_vec.append(self.V.dim())
 
@@ -132,42 +221,21 @@ class GoalAdaptiveEigenSolverComplex():
         bcs_high = reconstruct_bcs(bcs, V_high)
         A_adj_high  = replace_both(self.A_adj, v_high, u_high)
 
-        lamh_prim_vec,  eigfunc_prim_vec   = solve_eigs(A,  M, bcs,    nev=NEV_SOLVE, 
-                                                        solver_parameters=solver_parameters)
+        lamh_prim_vec,  eigfunc_prim_vec   = solve_eigs(A,  M, bcs,    nev=NEV_SOLVE, solver_parameters=solver_parameters_target)
         self.u_h = eigfunc_prim_vec[0]
         self.lam_h = lamh_prim_vec[0]
+        # Detect multiplicity 
+        m = 1
+        tolerance = 0.1
+        for i in range(1, len(lamh_prim_vec)):
+            if abs(lamh_prim_vec[i] - self.lam_h) <= tolerance:
+                m += 1
+        print("Eigenvalue multiplicity: ", m)
+        self.cluster_basis_h = eigfunc_prim_vec[:m] 
+        self.cluster_basis_h = orthonormalize_M(self.cluster_basis_h, self.M)
+        
 
-
-
-        def lift_real(u_r, V_high):
-            ur_h = Function(V_high); ur_h.interpolate(u_r)
-            with ur_h.dat.vec as vr:
-                seed = vr.copy()     # independent PETSc.Vec
-            return seed
-
-        # suppose cluster size is k (e.g. 2 for your π^2 example)
-        k = 2  # choose by inspecting Ritz values near the target
-
-        # build k seeds in V_high from the primal cluster in V
-        seeds = [lift_real(eigfunc_prim_vec[j].r, V_high) for j in range(k)]
-
-        if s.self_adjoint == True:
-            solver_parameters_target = {
-                "eps_gen_hermitian": None,
-                "eps_target": self.lam_h
-            }
-        else:
-            solver_parameters_target = {
-                "eps_target": self.lam_h
-            }
-        if self.sp_primal is not None:
-            solver_parameters = solver_parameters_target | self.sp_primal
-        else:
-            solver_parameters = solver_parameters_target
-        print("Higher DOFs: ", V_high.dim())
-        self.N_high_vec.append(V_high.dim())
-        lamh_prim_high_vec, eigfunc_prim_high_vec = solve_eigs(A_high, M_high, bcs_high, nev=NEV_SOLVE, 
-                                                               solver_parameters=solver_parameters)
+        lamh_prim_high_vec, eigfunc_prim_high_vec = solve_eigs(A_high, M_high, bcs_high, nev=NEV_SOLVE, solver_parameters=solver_parameters_target)
         
         
         print("Computed eigenvalue: ",self.lam_h)
@@ -175,41 +243,46 @@ class GoalAdaptiveEigenSolverComplex():
         self.lam_p, self.u_p = match_best_complex(self.u_h, eigfunc_prim_high_vec , self.M, lamh_prim_high_vec)
         
         if s.self_adjoint == False:
-            lamh_adj_vec, eigfunc_adj_vec = solve_eigs(self.A_adj, M, bcs, nev=NEV_SOLVE, 
-                                                       solver_parameters=solver_parameters)
-            lamh_adj_high_vec, eigfunc_adj_high_vec = solve_eigs(A_adj_high, M_high, bcs_high, nev=NEV_SOLVE, 
-                                                                 solver_parameters=solver_parameters)
+            lamh_adj_vec, eigfunc_adj_vec = solve_eigs(self.A_adj, M, bcs, nev=NEV_SOLVE, solver_parameters=solver_parameters_target)
+            lamh_adj_high_vec, eigfunc_adj_high_vec = solve_eigs(A_adj_high, M_high, bcs_high, nev=NEV_SOLVE, solver_parameters=solver_parameters_target)
             print("Matching eigenfunctions [dual in V]...")
             self.lamz_h, self.z_h = match_best_complex(self.u_h,eigfunc_adj_vec, self.M, lamh_adj_vec)
             print("Matching eigenfunctions [dual in V_high]...")
             self.lamz_p, self.z_p = match_best_complex(self.u_h,eigfunc_adj_high_vec, self.M, lamh_adj_high_vec)
+        else:
+            self.lamz_h =  self.lam_h
+            self.z_h = self.u_h
+            self.lamz_p = self.lam_p
+            self.z_p = self.u_p
 
     def estimate_global_error(self):
         s = self.solverctx
         u_p, u_h = self.u_p, self.u_h
-        lam_h = self.lam_h
-        
-         # projection of u_p to V (separately for r/i)
+        z_p, z_h = self.z_p, self.z_h  # equals u_* if self-adjoint
+        lam = self.lam_h
+        lam_r, lam_i = float(np.real(lam)), float(np.imag(lam))
+
+
+        # projection of u_p to V (separately for r/i)
         phi_r = Function(self.V); phi_r.interpolate(u_p.r)
         phi_i = Function(self.V); phi_i.interpolate(u_p.i)
         e        = CFun(u_p.r - phi_r, u_p.i - phi_i)
+
         e_sigma = c_diff(u_p, u_h)
+        e_sigma_adj = c_diff(z_p, z_h)
+
+        # sigma_h = 1/2 ||u - u_h||^2 (complex norm)
+        #sigma_h = 0.5 * assemble((inner(e_sigma.r, e_sigma.r) + inner(e_sigma.i, e_sigma.i)) * dx)
         
         if s.self_adjoint:
-            sigma_h = 0.5 * assemble(replace_both(self.M, e_sigma.r, e_sigma.r))
+            sigma_h = 0.5 * assemble((replace_both(self.M, e_sigma.r, e_sigma.r) + replace_both(self.M, e_sigma.i, e_sigma.i)))
             rhs = assemble(
-                replace_both(self.A, u_h.r, e.r) - lam_h*replace_both(self.M, u_h.r, e.r)
+                replace_both(self.A, u_h.r, e.r) - lam_r*replace_both(self.M, u_h.r, e.r)
             )
         else:
-            lam_r, lam_i = float(np.real(lam_h)), float(np.imag(lam_h))
-            z_p, z_h = self.z_p, self.z_h  # equals u_* if self-adjoint
-            psi_r = Function(self.V); psi_r.interpolate(z_p.r)
-            psi_i = Function(self.V); psi_i.interpolate(z_p.i)
-            e_sigma_adj = c_diff(z_p, z_h)
-            e_adj = CFun(z_p.r - psi_r, z_p.i - psi_i)
-
             sigma_h = 0.5 * assemble((replace_both(self.M, e_sigma.r, e_sigma_adj.r) + replace_both(self.M, e_sigma.i, e_sigma_adj.i)))
-
+            # DWR split (real/imag): 0.5 * ( <A u_h - λ M u_h, e_adj> + <A^T z_h - λ M^T z_h, e> )
+            e_adj = c_diff(z_p, z_h)
             rhs = 0.5*assemble(
                 replace_both(self.A, u_h.r, e_adj.r) - lam_r*replace_both(self.M, u_h.r, e_adj.r) + lam_i*replace_both(self.M, u_h.i, e_adj.r)
                 + replace_both(self.A, u_h.i, e_adj.i) - lam_r*replace_both(self.M, u_h.i, e_adj.i) - lam_i*replace_both(self.M, u_h.r, e_adj.i)
@@ -217,25 +290,112 @@ class GoalAdaptiveEigenSolverComplex():
                 + replace_both(self.A_adj, z_h.i, e.i) - lam_r*replace_both(self.M, z_h.i, e.i) - lam_i*replace_both(self.M, z_h.r, e.i)
             )
 
-        self.denom = 1.0 - sigma_h
-        self.eta_h = abs(rhs / self.denom) if abs(self.denom) > 1e-14 else float("nan")
+        denom = 1.0 - sigma_h
+        self.eta_h = abs(rhs / denom) if abs(denom) > 1e-14 else float("nan")
         self.etah_vec.append(self.eta_h)
         print(f"{'Predicted error:':45s}{':':8s}{self.eta_h:15.12f}")
 
         if self.lam_exact is not None:
-            self.eta = abs(self.lam_exact - lam_h)  # ok if lam_exact is real or complex
+            self.eta = abs(self.lam_exact - lam)  # ok if lam_exact is real or complex
             print(f"{'Exact error:':45s}{':':8s}{self.eta:15.12f}")
             self.eta_vec.append(self.eta)
+
+
+    def automatic_error_indicators1(self):
+        print("Computing local refinement indicators, η_K...")
+        s = self.solverctx
+        mesh = self.mesh
+        u_h, z_p, z_h = self.u_h, self.z_p, self.z_h
+        lam = self.lam_h
+        lam_r, lam_i = float(np.real(lam)), float(np.imag(lam))
+
+        # split residuals
+        Fr = replace_trial(self.A, u_h.r) - lam_r*replace_trial(self.M, u_h.r) + lam_i*replace_trial(self.M, u_h.i)
+        Fi = replace_trial(self.A, u_h.i) - lam_r*replace_trial(self.M, u_h.i) - lam_i*replace_trial(self.M, u_h.r)
+
+        dim = mesh.topological_dimension()
+        cell = mesh.ufl_cell()
+        variant = "integral"
+        deg_c = self.degree + s.cell_residual_extra_degree
+        deg_f = self.degree + s.facet_residual_extra_degree
+
+        B = FunctionSpace(mesh, "B", dim+1, variant=variant)
+        bubbles = Function(B).assign(1)
+
+        if self.V.value_shape == ():
+            DG = FunctionSpace(self.mesh, "DG", deg_c, variant=variant)
+        else:
+            DG = TensorFunctionSpace(self.mesh, "DG", deg_c, variant=variant, shape=self.V.value_shape)
+
+        uc = TrialFunction(DG); vc = TestFunction(DG)
+        ac = inner(uc, bubbles*vc) * dx
+        Lc_r = residual(Fr, bubbles*vc)
+        Lc_i = residual(Fi, bubbles*vc)
+
+        Rcell_r = Function(DG, name="Rcell_r")
+        Rcell_i = Function(DG, name="Rcell_i")
+        solve(ac == Lc_r, Rcell_r, solver_parameters=sp_cell2)
+        solve(ac == Lc_i, Rcell_i, solver_parameters=sp_cell2)
+
+        FB = FunctionSpace(mesh, "FB", dim, variant=variant)
+        cones = Function(FB).assign(1)
+        el = BrokenElement(FiniteElement("FB", cell=cell, degree=deg_f+dim, variant=variant))
+        Q = FunctionSpace(mesh, el) if self.V.value_shape == () else TensorFunctionSpace(mesh, el, shape=self.V.value_shape)
+        Qtest = TestFunction(Q); Qtrial = TrialFunction(Q)
+
+        Lf_r = residual(Fr, Qtest) - inner(Rcell_r, Qtest)*dx
+        Lf_i = residual(Fi, Qtest) - inner(Rcell_i, Qtest)*dx
+        af   = both(inner(Qtrial/cones, Qtest))*dS + inner(Qtrial/cones, Qtest)*ds
+
+        Rhat_r = Function(Q); Rhat_i = Function(Q)
+        solve(af == Lf_r, Rhat_r, solver_parameters=sp_facet1)
+        solve(af == Lf_i, Rhat_i, solver_parameters=sp_facet1)
+        Rfacet_r = Rhat_r/cones
+        Rfacet_i = Rhat_i/cones
+
+        DG0 = FunctionSpace(mesh, "DG", degree=0)
+        test = TestFunction(DG0)
+        z_err = c_diff(z_p, z_h)
+
+        self.etaT = assemble(
+            (inner(Rcell_r,  z_err.r) + inner(Rcell_i,  z_err.i)) * test * dx
+            + avg(inner(Rfacet_r, z_err.r) + inner(Rfacet_i, z_err.i)) * both(test) * dS
+            + (inner(Rfacet_r,   z_err.r) + inner(Rfacet_i,   z_err.i)) * test * ds
+        )
 
     def automatic_error_indicators(self):
         """
         Compute local refinement indicators η_K using BOTH primal and adjoint residuals,
         split into real/imag parts (so 4 local residual approximations: Fr_u, Fi_u, Fr_z, Fi_z).
 
-        η_K ≈ 0.5 * [ <R_u, z_err> + <R_z, u_err> ] (cell + interior/boundary facet contributions)
+        η_K ≈ 0.5 * [ <R_u, z_err> + <R_z, e_err> ] (cell + interior/boundary facet contributions)
         """
+        print("Computing local refinement indicators, η_K (primal + adjoint)...")
         s = self.solverctx
         mesh = self.mesh
+
+        # Ensure dual fields exist in self-adjoint mode
+        if not hasattr(self, "z_h"):
+            self.z_h = self.u_h
+        if not hasattr(self, "z_p"):
+            self.z_p = self.u_p
+
+        u_h, z_h = self.u_h, self.z_h
+        u_p, z_p = self.u_p, self.z_p
+
+        lam = self.lam_h
+        lam_r = float(np.real(lam))
+        lam_i = float(np.imag(lam))
+
+        # ----- Residual forms (split into real/imag) -----
+        # Primal: (A - λ M) u = 0
+        Fr_u = replace_trial(self.A, u_h.r) - lam_r*replace_trial(self.M, u_h.r) + lam_i*replace_trial(self.M, u_h.i)
+        Fi_u = replace_trial(self.A, u_h.i) - lam_r*replace_trial(self.M, u_h.i) - lam_i*replace_trial(self.M, u_h.r)
+
+        # Adjoint: (A^T - λ M^T) z = 0  (M is symmetric in our setting, so we reuse self.M)
+        # self.A_adj should have been set in solve_eigenproblems()
+        Fr_z = replace_trial(self.A_adj, z_h.r) - lam_r*replace_trial(self.M, z_h.r) + lam_i*replace_trial(self.M, z_h.i)
+        Fi_z = replace_trial(self.A_adj, z_h.i) - lam_r*replace_trial(self.M, z_h.i) - lam_i*replace_trial(self.M, z_h.r)
 
         # ----- Spaces for local solves -----
         dim = mesh.topological_dimension()
@@ -256,6 +416,22 @@ class GoalAdaptiveEigenSolverComplex():
         vc = TestFunction(DG)
         ac = inner(uc, bubbles*vc) * dx
 
+        # ----- Cell residual solves (4 of them) -----
+        Lc_r_u = residual(Fr_u, bubbles*vc)
+        Lc_i_u = residual(Fi_u, bubbles*vc)
+        Lc_r_z = residual(Fr_z, bubbles*vc)
+        Lc_i_z = residual(Fi_z, bubbles*vc)
+
+        Rcell_r_u = Function(DG, name="Rcell_r_u")
+        Rcell_i_u = Function(DG, name="Rcell_i_u")
+        Rcell_r_z = Function(DG, name="Rcell_r_z")
+        Rcell_i_z = Function(DG, name="Rcell_i_z")
+
+        solve(ac == Lc_r_u, Rcell_r_u, solver_parameters=sp_cell2)
+        solve(ac == Lc_i_u, Rcell_i_u, solver_parameters=sp_cell2)
+        solve(ac == Lc_r_z, Rcell_r_z, solver_parameters=sp_cell2)
+        solve(ac == Lc_i_z, Rcell_i_z, solver_parameters=sp_cell2)
+
         # ----- Facet residual solves (4 of them) -----
         FB = FunctionSpace(mesh, "FB", dim, variant=variant)
         cones = Function(FB).assign(1)
@@ -268,61 +444,49 @@ class GoalAdaptiveEigenSolverComplex():
 
         Qtest = TestFunction(Q)
         Qtrial = TrialFunction(Q)
+
+        Lf_r_u = residual(Fr_u, Qtest) - inner(Rcell_r_u, Qtest)*dx
+        Lf_i_u = residual(Fi_u, Qtest) - inner(Rcell_i_u, Qtest)*dx
+        Lf_r_z = residual(Fr_z, Qtest) - inner(Rcell_r_z, Qtest)*dx
+        Lf_i_z = residual(Fi_z, Qtest) - inner(Rcell_i_z, Qtest)*dx
+
         af = both(inner(Qtrial/cones, Qtest))*dS + inner(Qtrial/cones, Qtest)*ds
 
-        DG0 = FunctionSpace(mesh, "DG", degree=0)
-        test = TestFunction(DG0)
-        DG0_dual = DG0.dual()          # or DG0.ufl_function_space().dual() depending on version
-        self.etaT = Cofunction(DG0_dual) 
-        self.etaT.assign(0.0)
+        Rhat_r_u = Function(Q); Rhat_i_u = Function(Q)
+        Rhat_r_z = Function(Q); Rhat_i_z = Function(Q)
+        solve(af == Lf_r_u, Rhat_r_u, solver_parameters=sp_facet1)
+        solve(af == Lf_i_u, Rhat_i_u, solver_parameters=sp_facet1)
+        solve(af == Lf_r_z, Rhat_r_z, solver_parameters=sp_facet1)
+        solve(af == Lf_i_z, Rhat_i_z, solver_parameters=sp_facet1)
 
+        Rfacet_r_u = Rhat_r_u/cones
+        Rfacet_i_u = Rhat_i_u/cones
+        Rfacet_r_z = Rhat_r_z/cones
+        Rfacet_i_z = Rhat_i_z/cones
 
-        # ----- Cell residual solves (4 of them) -----
-        def etaT_contribution(residual_form, error):
-            Lc = residual(residual_form, bubbles*vc)
-            Rcell = Function(DG, name="Rcell_r_u")
-            solve(ac == Lc, Rcell, solver_parameters=sp_cell2)
-            Lf = residual(residual_form, Qtest) - inner(Rcell, Qtest)*dx
-            Rhat = Function(Q)
-            solve(af == Lf, Rhat, solver_parameters=sp_facet1)
-            Rfacet = Rhat/cones
-
-            self.etaT += assemble(
-                inner(Rcell,  error) * test * dx
-                + avg(inner(Rfacet, error)) * both(test) * dS
-                + (  inner(Rfacet, error)) * test * ds
-            )
-
-        u_h = self.u_h
-        u_p = self.u_p
+        # ----- Error weights (align spaces onto V first) -----
+        z_err = c_diff(z_p, z_h)
         u_err = c_diff(u_p, u_h)
 
-        lam = self.lam_h
-        lam_r = float(np.real(lam))
-        lam_i = float(np.imag(lam))
+        # ----- Assemble η_T (cell + facets), with 0.5 factor for symmetric DWR combination -----
+        DG0 = FunctionSpace(mesh, "DG", degree=0)
+        test = TestFunction(DG0)
+
+        self.etaT = assemble(
+            0.5 * (
+                # primal residual weighted by z_err
+                    (inner(Rcell_r_u,  z_err.r) + inner(Rcell_i_u,  z_err.i)) * test * dx
+                    + avg(inner(Rfacet_r_u, z_err.r) + inner(Rfacet_i_u, z_err.i)) * both(test) * dS
+                    + (inner(Rfacet_r_u,   z_err.r) + inner(Rfacet_i_u,   z_err.i)) * test * ds
+
+                        # + adjoint residual weighted by e_err
+                    + (inner(Rcell_r_z,  u_err.r) + inner(Rcell_i_z,  u_err.i)) * test * dx
+                    + avg(inner(Rfacet_r_z, u_err.r) + inner(Rfacet_i_z, u_err.i)) * both(test) * dS
+                    + (inner(Rfacet_r_z,   u_err.r) + inner(Rfacet_i_z,   u_err.i)) * test * ds
+            )
+        )
 
 
-        if s.self_adjoint == True:
-            print("Computing local refinement indicators, η_K (self-adjoint)...")
-            Fr_u = replace_trial(self.A, u_h.r) - lam_r*replace_trial(self.M, u_h.r)
-            etaT_contribution(Fr_u, u_err.r)
-            
-        else:
-            print("Computing local refinement indicators, η_K (primal + adjoint)...") 
-            z_h = self.z_h
-            z_p = self.z_p
-            z_err = c_diff(z_p, z_h)
-
-            Fr_u = replace_trial(self.A, u_h.r) - lam_r*replace_trial(self.M, u_h.r) + lam_i*replace_trial(self.M, u_h.i)
-            Fi_u = replace_trial(self.A, u_h.i) - lam_r*replace_trial(self.M, u_h.i) - lam_i*replace_trial(self.M, u_h.r)
-            Fr_z = replace_trial(self.A_adj, z_h.r) - lam_r*replace_trial(self.M, z_h.r) + lam_i*replace_trial(self.M, z_h.i)
-            Fi_z = replace_trial(self.A_adj, z_h.i) - lam_r*replace_trial(self.M, z_h.i) - lam_i*replace_trial(self.M, z_h.r)
-            
-            etaT_contribution(0.5*Fr_u, z_err.r)
-            etaT_contribution(0.5*Fi_u, z_err.i)
-            etaT_contribution(0.5*Fr_z, u_err.r)
-            etaT_contribution(0.5*Fi_z, u_err.i)
-       
 
     def manual_error_indicators(self):
         ''' Currently only implemented for Poisson, but can be overriden. To adapt to other PDEs, replace the form of 
@@ -344,8 +508,8 @@ class GoalAdaptiveEigenSolverComplex():
         with self.etaT.dat.vec as evec:
             evec.abs()    
             self.etaT_array = evec.getArray()
-        print("Denominator size: ", self.denom)
-        self.etaT_total = abs(np.sum(self.etaT_array)) / self.denom
+
+        self.etaT_total = abs(np.sum(self.etaT_array))
         self.etaTsum_vec.append(self.etaT_total)
         print(f"{'Sum of refinement indicators':45s}{'Ση_K:':8s}{self.etaT_total:15.12f}")
 
@@ -388,6 +552,7 @@ class GoalAdaptiveEigenSolverComplex():
         self.markers.assign(1)        
 
     def refine_mesh(self):
+        
         def _rebind_form_to_mesh(form, V_new, mesh_new):
             """Put form on V_new / mesh_new. Handles the common '... * dx' case."""
             args = form.arguments()
@@ -446,8 +611,8 @@ class GoalAdaptiveEigenSolverComplex():
             file_path = self.output_dir / "results.csv"
         else:
             file_path = self.output_dir / s.results_file_name
-        rows = list(zip(self.N_vec, self.N_high_vec, self.eta_vec, self.etah_vec, self.etaTsum_vec, self.eff1_vec, self.eff2_vec))
-        headers = ("N", "N_high", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
+        rows = list(zip(self.N_vec, self.Ndual_vec, self.eta_vec, self.etah_vec, self.etaTsum_vec, self.eff1_vec, self.eff2_vec))
+        headers = ("N", "Ndual", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
         with open(file_path, "w", newline="") as file:
             w = csv.writer(file)
             w.writerow(headers)
@@ -456,27 +621,27 @@ class GoalAdaptiveEigenSolverComplex():
 
     def append_data(self, it):
         s = self.solverctx
-        if s.run_name is None:
+        if s.results_file_name is None:
             file_path = self.output_dir / "results.csv"
         else:
-            file_path = self.output_dir / f"{s.run_name}/{s.run_name}_results.csv"
+            file_path = self.output_dir / s.results_file_name
         if self.lam_exact is None and self.solverctx.uniform_refinement == False:
-            headers = ("iteration", "N", "N_high", "eta_h", "sum_eta_T")
+            headers = ("iteration", "N", "Ndual", "eta_h", "sum_eta_T")
             row = (
                 it,
-                self.N_vec[-1], self.N_high_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1]
+                self.N_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1]
             )
         elif self.solverctx.uniform_refinement == True:
-            headers = ("iteration", "N", "N_high", "eta", "eta_h")
+            headers = ("iteration", "N", "Ndual", "eta", "eta_h")
             row = (
                 it,
-                self.N_vec[-1], self.N_high_vec[-1], self.eta_vec[-1], self.etah_vec[-1]
+                self.N_vec[-1], self.eta_vec[-1], self.etah_vec[-1]
             )
         else:
-            headers = ("iteration", "N", "N_high", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
+            headers = ("iteration", "N", "Ndual", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
             row = (
                 it,
-                self.N_vec[-1], self.N_high_vec[-1], self.eta_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1], self.eff1_vec[-1], self.eff2_vec[-1]
+                self.N_vec[-1], self.eta_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1], self.eff1_vec[-1], self.eff2_vec[-1]
             )
         
         file_exists = os.path.exists(file_path)
@@ -513,7 +678,7 @@ class GoalAdaptiveEigenSolverComplex():
                     should_write = (it % interval == 0)  # includes it=0
         if should_write:
             print("Writing mesh ...")
-            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_mesh{it}.pvd").write(self.mesh)
+            VTKFile(self.output_dir / f"mesh{it}.pvd").write(self.mesh)
 
     def write_solution(self,it):
         s = self.solverctx
@@ -537,8 +702,8 @@ class GoalAdaptiveEigenSolverComplex():
                     should_write = (it % interval == 0)  # includes it=0
         if should_write:
             print("Writing (primal) solution (real & imag)...")
-            #VTKFile(self.output_dir / f"solution_{it}.pvd").write(*self.u_h.r.subfunctions,
-            #*self.u_h.i.subfunctions)
+            VTKFile(self.output_dir / f"solution_{it}.pvd").write(*self.u_h.r.subfunctions,
+            *self.u_h.i.subfunctions)
 
             # --- pull out the velocity block (index 0) from u_h.r / u_h.i ---
             # if not mixed, this just returns the whole function
@@ -564,7 +729,7 @@ class GoalAdaptiveEigenSolverComplex():
                 p_i = self.u_h.i.subfunctions[1]
                 outs.extend([p_r, p_i])
 
-            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_solution_{it}.pvd").write(*outs)
+            VTKFile(self.output_dir / f"solution_{it}.pvd").write(*outs)
 
     def solve(self):
         s = self.solverctx
@@ -603,56 +768,17 @@ class GoalAdaptiveEigenSolverComplex():
     def both(self, u):
         return u("+") + u("-")
 
-# Helper functions
-@dataclass
-class CFun:
-    r: Function  # real part
-    i: Function  # imag part
 
-def c_from_pair(vr: Function, vi: Function | None) -> CFun:
-    if vi is None:
-        vi = Function(vr.function_space()); vi.assign(0)
-    return CFun(vr, vi)
+def getlabels(mesh): # Doesn't seem to work in 2D ?
+    ngmesh = mesh.netgen_mesh
+    names = ngmesh.GetRegionNames(codim=2)
+    print(names)
+    names_to_labels = {}
+    for l in names:
+        names_to_labels[l] = tuple(i+1 for i, name in enumerate(names) if name == l)
+        print(names_to_labels[l])
+    return names_to_labels
 
-def c_copy(u: CFun) -> CFun:
-    ur = u.r.copy(deepcopy=True); ui = u.i.copy(deepcopy=True)
-    return CFun(ur, ui)
-
-def c_inner(u: CFun, v: CFun, Mform) -> complex:
-    # Hermitian M-inner product: <u,v>_M = re + i*im
-    def ip(a, b):  # <a,b>_M
-        return float(assemble(replace_both(Mform, b, a)))
-    re = ip(u.r, v.r) + ip(u.i, v.i)
-    im = ip(u.r, v.i) - ip(u.i, v.r)
-    return complex(re, im)
-
-def c_norm(u: CFun, Mform) -> float:
-    # ||u||_M = sqrt(<u,u>_M) ; imaginary part is ~0 numerically
-    val = c_inner(u, u, Mform).real
-    return (val if val > 0.0 else 0.0) ** 0.5
-
-def c_normalize(u: CFun, Mform) -> CFun:
-    n = c_norm(u, Mform)
-    if n > 0:
-        u.r.assign(u.r / n); u.i.assign(u.i / n)
-    return u
-
-def c_align(u: CFun, target: CFun, Mform) -> CFun:
-    # phase-align u s.t. <target,u>_M is real & positive
-    c = c_inner(target, u, Mform)
-    if c == 0:
-        return u
-    phase = c.conjugate() / abs(c)
-    ar, ai = phase.real, phase.imag
-    ur = Function(u.r.function_space()); ui = Function(u.r.function_space())
-    ur.assign(ar*u.r - ai*u.i)
-    ui.assign(ai*u.r + ar*u.i)
-    return CFun(ur, ui)
-
-def c_diff(a: CFun, b: CFun) -> CFun:  # a - b
-    ur = (a.r - b.r)
-    ui = (a.i - b.i)
-    return CFun(ur, ui)
 
 def replace_trial(bilinear_form, coeff):
     test, trial = bilinear_form.arguments()
@@ -672,33 +798,14 @@ def residual(F, test): # Residual helper function
     v = F.arguments()[0]
     return replace(F, {v: test})
 
-def both(u):
-    return u("+") + u("-")
 
-def prolong_cfun(u: CFun, V_high) -> CFun:
-                ur_h = Function(V_high); ur_h.interpolate(u.r)
-                ui_h = Function(V_high); ui_h.interpolate(u.i)
-                return CFun(ur_h, ui_h)
+# For transferring to new mesh :
 
-def cfun_to_vecnest(u: CFun) -> PETSc.Vec:
-    # Enter the contexts to retrieve the underlying PETSc.Vec's
-    with u.r.dat.vec as vr, u.i.dat.vec as vi:    # writable views
-        # Make independent copies so EPS can modify them
-        vrc = vr.duplicate(); vrc.copy(vr)
-        vic = vi.duplicate(); vic.copy(vi)
-    vnest = PETSc.Vec().createNest([vrc, vic])
-    # Keep references alive (defensive; PETSc should hold refs but this avoids GC surprises)
-    #vnest._blocks = (vrc, vic)
-    return vnest
-
-sp_cell2   = {"mat_type": "matfree", "snes_type": "ksponly", "ksp_type": "cg", "pc_type": "jacobi", "pc_hypre_type": "pilut"}
-sp_facet1  = {"mat_type": "matfree", "snes_type": "ksponly", "ksp_type": "cg", "pc_type": "jacobi", "pc_hypre_type": "pilut"}
-
-# For transferring to higher function space:
 def reconstruct_bc_value(bc, V):
     if not isinstance(bc._original_arg, firedrake.Function):
         return bc._original_arg
     return Function(V).interpolate(bc._original_arg)
+
 def reconstruct_bcs(bcs, V):
     """Reconstruct a list of bcs"""
     new_bcs = []
@@ -710,7 +817,14 @@ def reconstruct_bcs(bcs, V):
         new_bcs.append(bc.reconstruct(V=V_, g=g))
     return new_bcs
 
-# =============== Currently not used: ===============
+
+# Residual-based indicators
+def both(u):
+    return u("+") + u("-")
+
+sp_cell2   = {"mat_type": "matfree", "snes_type": "ksponly", "ksp_type": "cg", "pc_type": "jacobi", "pc_hypre_type": "pilut"}
+sp_facet1  = {"mat_type": "matfree", "snes_type": "ksponly", "ksp_type": "cg", "pc_type": "jacobi", "pc_hypre_type": "pilut"}
+
 
 from ufl.duals import is_dual
 from firedrake.dmhooks import get_transfer_manager, get_appctx
