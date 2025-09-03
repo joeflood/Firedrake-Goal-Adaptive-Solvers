@@ -8,7 +8,7 @@ from goal_adaptivity import getlabels
 def l2_norm(f):
     return assemble(inner(f, f)*dx)**0.5
 
-initial_mesh_size = 0.01
+initial_mesh_size = 0.05
 
 box1 = WorkPlane().MoveTo(0, 0).Rectangle(2.2, 0.41).Face()
 circle = WorkPlane().MoveTo(0.2, 0.2).Circle(0.05).Face()
@@ -43,7 +43,7 @@ solver_parameters = {
     #"use_adjoint_residual": True
 }
 # Define actual problem -----------------------
-degree = 2
+degree = 5
 # Define function spaces
 V = VectorFunctionSpace(mesh, "CG", degree=degree, dim=2)
 P = FunctionSpace(mesh, "CG", degree=degree-1)
