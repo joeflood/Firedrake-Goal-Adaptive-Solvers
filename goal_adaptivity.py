@@ -390,7 +390,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
             file_path = self.output_dir / "results.csv"
         else:
             file_path = self.output_dir / f"{s.run_name}/{s.run_name}_results.csv"
-        if self.u_exact is None and self.M_exact is None and self.solverctx.uniform_refinement == False:
+        if self.u_exact is None and self.goal_exact is None and self.solverctx.uniform_refinement == False:
             headers = ("iteration", "N", "Ndual", "Juh", "eta_h", "sum_eta_T")
             row = (
                 it,
