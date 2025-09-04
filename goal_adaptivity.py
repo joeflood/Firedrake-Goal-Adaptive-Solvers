@@ -175,7 +175,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
             self.Ju = self.goal_exact
         
         if self.u_exact is not None or self.goal_exact is not None:
-            self.eta = abs(Juh - self.Ju)
+            self.eta = abs(self.Juh - self.Ju)
             self.eta_vec.append(self.eta)
             print(f"{'Exact goal':45s}{'J(u):':8s}{self.Ju:15.12f}")
             print(f"{'True error, |J(u) - J(u_h)|':45s}{'η:':8s}{self.eta:15.12f}")
