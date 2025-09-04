@@ -8,7 +8,7 @@ from goal_adaptivity import getlabels
 def l2_norm(f):
     return assemble(inner(f, f)*dx)**0.5
 
-initial_mesh_size = 0.02
+initial_mesh_size = 0.05
 
 box1 = WorkPlane().MoveTo(0, 0).Rectangle(2.2, 0.41).Face()
 circle = WorkPlane().MoveTo(0.2, 0.2).Circle(0.05).Face()
@@ -66,22 +66,13 @@ ds_out  = ds(labels["outflow"])
 ds_wall = ds(labels["noslip"])
 ds_cyl  = ds(labels["cylinder"])
 n = FacetNormal(mesh)
+
 # Traditional form
 F = (
-    nu * inner(grad(u), grad(v)) * dx +
-    inner(grad(u)*u, v) *dx - 
-    inner(p, div(v)) * dx +
-    inner(div(u), q) * dx
-)
-
-
-
-# Skew form
-F = (
-    nu * inner(sym(grad(u)), sym(grad(v))) * dx +
-    inner(dot(u, nabla_grad(u)), v) * dx - 0.5*inner(div(u)*u, v) *dx - 
-    inner(p, div(v)) * dx +
-    inner(div(u), q) * dx
+    nu*inner(grad(u), grad(v))*dx                      # ν ∫ ∇u:∇v
+  + inner(dot(u, nabla_grad(u)), v)*dx                # ∫ (u·∇)u · v
+  - p*div(v)*dx
+  + q*div(u)*dx
 )
 
 bcs = [
@@ -96,17 +87,11 @@ nullspace = MixedVectorSpaceBasis(T, [T.sub(0), VectorSpaceBasis(constant=True)]
 
 # Goal: Lift around cylinder
 I = Identity(2)
-tau = nu*sym(grad(u)) - p*I
-traction = tau*n
+traction_on_body = (nu*grad(u) - p*I)*n 
 e2 = as_vector([0.0, 1.0])
-#M = 500* dot(traction, e2) * ds_cyl
+M = 500 *dot(traction_on_body, e2)*ds_cyl
 
-#M = 500*dot(nu*dot(grad(u), n) - p*n, e2) * ds_cyl
-M = 500*dot(dot(nu*grad(u) - p*I, n), e2) * ds_cyl
-
-#M_exact = 0.010618948146 # Exact solution 
-M_exact = 0.03905563
-#M_exact = 0.039055611
+M_exact = 0.010618948146 # Exact solution given in Rognes & Logg ex.3
 tolerance = 0.00000001
 
 sp_primal = {"snes_monitor": None,
@@ -141,6 +126,5 @@ for i, nu_val in enumerate(visc_schedule):
 
 print(nu)
 problem = NonlinearVariationalProblem(F, t, bcs)
-adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem,  M, tolerance, solver_parameters, 
-                                                          primal_solver_parameters=sp_primal, nullspace=nullspace, exact_goal=M_exact)
+adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem,  M, tolerance, solver_parameters, primal_solver_parameters=sp_primal, nullspace=nullspace)
 adaptive_problem.solve()

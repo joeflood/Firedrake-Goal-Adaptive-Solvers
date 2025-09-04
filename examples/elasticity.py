@@ -11,10 +11,11 @@ degree = 1
 # Define solver parameters ---------------------
 solver_parameters = {
     "max_iterations": 20,
-    "output_dir": "output/elasticity",
+    "output_dir": "output_final",
+    "run_name": "elasticity_final",
     "manual_indicators": False,
     "dual_extra_degree": 1,
-    "use_adjoint_residual": True,
+    "use_adjoint_residual": False,
     "primal_low_method": "solve",
     "dual_low_method": "interpolate"
     #"uniform_refinement": True

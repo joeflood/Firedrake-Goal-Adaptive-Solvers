@@ -30,14 +30,15 @@ mesh = Mesh(ngmesh)
 # Define solver parameters ---------------------
 solver_parameters = {
     "max_iterations": 5,
-    "output_dir": "output/conv-diff-new",
+    "run_name": "poisson3D_final",
+    "output_dir": "output_final"
     #"uniform_refinement": True
     #"use_adjoint_residual": True
 }
 
 degree = 1
 n = FacetNormal(mesh)
-V = FunctionSpace(mesh, "CG", degree, variant="integral") # Template function space used to define the PDE
+V = FunctionSpace(mesh, "CG", degree) # Template function space used to define the PDE
 u = Function(V, name="Solution")
 v = TestFunction(V)
 (x, y, z) = SpatialCoordinate(u.function_space().mesh()) # MMS Method of Manufactured Solution
@@ -76,4 +77,4 @@ sp_primal = {"pc_type": "cholesky",
 problem = NonlinearVariationalProblem(F, u, bcs)
 
 GoalAdaptiveNonlinearVariationalSolver(problem, J, tolerance, solver_parameters, primal_solver_parameters=sp_primal,
-                                       dual_solver_parameters=sp_dual, exact_solution=u_exact).solve()
+                                       exact_solution=u_exact).solve()

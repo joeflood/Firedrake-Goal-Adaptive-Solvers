@@ -8,7 +8,7 @@ from goal_adaptivity import getlabels
 def l2_norm(f):
     return assemble(inner(f, f)*dx)**0.5
 
-initial_mesh_size = 0.02
+initial_mesh_size = 0.005
 
 box1 = WorkPlane().MoveTo(0, 0).Rectangle(2.2, 0.41).Face()
 circle = WorkPlane().MoveTo(0.2, 0.2).Circle(0.05).Face()
@@ -43,7 +43,7 @@ solver_parameters = {
     #"use_adjoint_residual": True
 }
 # Define actual problem -----------------------
-degree = 2
+degree = 5
 # Define function spaces
 V = VectorFunctionSpace(mesh, "CG", degree=degree, dim=2)
 P = FunctionSpace(mesh, "CG", degree=degree-1)
@@ -68,7 +68,7 @@ ds_cyl  = ds(labels["cylinder"])
 n = FacetNormal(mesh)
 # Traditional form
 F = (
-    nu * inner(grad(u), grad(v)) * dx +
+    nu * inner(sym(grad(u)), sym(grad(v))) * dx +
     inner(grad(u)*u, v) *dx - 
     inner(p, div(v)) * dx +
     inner(div(u), q) * dx
@@ -104,17 +104,24 @@ e2 = as_vector([0.0, 1.0])
 #M = 500*dot(nu*dot(grad(u), n) - p*n, e2) * ds_cyl
 M = 500*dot(dot(nu*grad(u) - p*I, n), e2) * ds_cyl
 
-#M_exact = 0.010618948146 # Exact solution 
-M_exact = 0.03905563
-#M_exact = 0.039055611
-tolerance = 0.00000001
+M_exact = 0.010618948146 # Exact solution given in Rognes & Logg ex.3
+tolerance = 0.000001
 
 sp_primal = {"snes_monitor": None,
              "snes_linesearch_monitor": None,
              "snes_linesearch_type": "l2"}
 
+print(T.dim())
+
+sys.exit()
 problem = NonlinearVariationalProblem(F, t, bcs)
-nls = NonlinearVariationalSolver(problem, solver_parameters=sp_primal)
+nls = NonlinearVariationalSolver(problem, solver_parameters=sp_primal, nullspace=nullspace, transpose_nullspace=nullspace)
+nls.solve()
+
+
+print("Solved")
+Mu_exact = assemble(M)
+print(Mu_exact)
 
 # Parameter continuation loop for initial guess
 visc_schedule = np.logspace(np.log10(0.05), np.log10(0.001), num=5)
@@ -139,8 +146,4 @@ for i, nu_val in enumerate(visc_schedule):
     Juh = assemble(500*dot(dot(nu*grad(u) - p*I, n), e2) * ds_cyl)
     print("J(u_h) = ", Juh)
 
-print(nu)
-problem = NonlinearVariationalProblem(F, t, bcs)
-adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem,  M, tolerance, solver_parameters, 
-                                                          primal_solver_parameters=sp_primal, nullspace=nullspace, exact_goal=M_exact)
-adaptive_problem.solve()
+

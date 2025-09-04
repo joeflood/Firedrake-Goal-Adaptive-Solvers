@@ -58,15 +58,13 @@ class GoalAdaptiveNonlinearVariationalSolver():
         s = self.solverctx
         ndofs = self.V.dim()
         self.N_vec.append(ndofs)
-        nullspace = MixedVectorSpaceBasis(self.V, [self.V.sub(0), VectorSpaceBasis(constant=True)])
         def solve_uh():
             if self.sp_primal is None:
                 print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: Default nonlinear solve] ...")
-                NonlinearVariationalSolver(self.problem, nullspace=nullspace, transpose_nullspace=nullspace).solve()
+                NonlinearVariationalSolver(self.problem).solve()
             else:
                 print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: User defined] ...")
-                NonlinearVariationalSolver(self.problem, solver_parameters=self.sp_primal, 
-                nullspace=nullspace, transpose_nullspace=nullspace).solve()
+                NonlinearVariationalSolver(self.problem, solver_parameters=self.sp_primal).solve()
         
         if s.use_adjoint_residual == True:
             # Now solve in higher space
@@ -162,32 +160,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
 
         self.etah_vec.append(self.eta_h)
 
-        Juh = assemble(self.J)
-        print(f"{'Computed goal':45s}{'J(uh):':8s}{Juh:15.12f}")
+        self.Juh = assemble(self.J)
+        print(f"{'Computed goal':45s}{'J(uh):':8s}{self.Juh:15.12f}")
 
-        Umax  = Constant(0.3)
-        Umean = 2*Umax/3            # 0.2
-        D     = Constant(0.10) 
-        scale = 2.0/(Umean**2*D)    # = 500
-        nu = 0.001
-        mesh = self.mesh
-        n = FacetNormal(mesh)
-        I   = Identity(2)
-        u, p = split(self.u)
-        e2 = as_vector([0.0, 1.0])
-        labels = getlabels(mesh,1)
-        ds_cyl  = ds(labels["cylinder"]) 
-        tau_v = 2*nu*sym(grad(u))
-        tau_p = -p*I
-        FL_v  = assemble(dot(tau_v*n, e2) * ds_cyl)
-        FL_p  = assemble(dot(tau_p*n, e2) * ds_cyl)
-        print("CL parts: visc =", float(scale*FL_v), "  pressure =", float(scale*FL_p))
-        #def peval(px, py):
-        #    return float(p.at([px, py], tolerance=1e-10))
-        #print("Δp ref check =", peval(0.15, 0.20) - peval(0.25, 0.20))
-
-        Juh = float(scale*FL_v) + float(scale*FL_p)
-        print("New computed goal: ", Juh)
         if self.u_exact is not None:
             quad_opts = {"quadrature_degree": 20}
             def as_mixed(exprs):
@@ -415,23 +390,23 @@ class GoalAdaptiveNonlinearVariationalSolver():
             file_path = self.output_dir / "results.csv"
         else:
             file_path = self.output_dir / f"{s.run_name}/{s.run_name}_results.csv"
-        if self.u_exact is None and self.solverctx.uniform_refinement == False:
-            headers = ("iteration", "N", "Ndual", "eta_h", "sum_eta_T")
+        if self.u_exact is None and self.M_exact is None and self.solverctx.uniform_refinement == False:
+            headers = ("iteration", "N", "Ndual", "Juh", "eta_h", "sum_eta_T")
             row = (
                 it,
-                self.N_vec[-1], self.Ndual_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1]
+                self.N_vec[-1], self.Ndual_vec[-1], self.Juh, self.etah_vec[-1], self.etaTsum_vec[-1]
             )
         elif self.solverctx.uniform_refinement == True:
-            headers = ("iteration", "N", "Ndual", "eta", "eta_h")
+            headers = ("iteration", "N", "Ndual", "Juh", "eta", "eta_h")
             row = (
                 it,
-                self.N_vec[-1], self.Ndual_vec[-1], self.eta_vec[-1], self.etah_vec[-1]
+                self.N_vec[-1], self.Ndual_vec[-1], self.Juh, self.eta_vec[-1], self.etah_vec[-1]
             )
         else:
-            headers = ("iteration", "N", "Ndual", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
+            headers = ("iteration", "N", "Ndual", "Juh", "eta", "eta_h", "sum_eta_T", "eff1", "eff2")
             row = (
                 it,
-                self.N_vec[-1], self.Ndual_vec[-1], self.eta_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1], self.eff1_vec[-1], self.eff2_vec[-1]
+                self.N_vec[-1], self.Ndual_vec[-1], self.Juh, self.eta_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1], self.eff1_vec[-1], self.eff2_vec[-1]
             )
         
         file_exists = os.path.exists(file_path)
@@ -468,7 +443,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
                     should_write = (it % interval == 0)  # includes it=0
         if should_write:
             print("Writing mesh ...")
-            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}mesh{it}.pvd").write(self.mesh)
+            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_mesh_{it}.pvd").write(self.mesh)
 
     def write_solution(self,it):
         s = self.solverctx
@@ -493,6 +468,8 @@ class GoalAdaptiveNonlinearVariationalSolver():
         if should_write:
             print("Writing (primal) solution ...")
             VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_solution_{it}.pvd").write(*self.u.subfunctions)
+            print("Writing (dual) solution ...")
+            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_dual_solution_{it}.pvd").write(*self.z.subfunctions)
 
     def solve(self):
         s = self.solverctx
@@ -501,8 +478,8 @@ class GoalAdaptiveNonlinearVariationalSolver():
             print(f"---------------------------- [MESH LEVEL {it}] ----------------------------")
             self.write_mesh(it)
             self.solve_primal()
-            self.write_solution(it)
             self.solve_dual()
+            self.write_solution(it)
             self.compute_etah()
             if self.eta_h < self.tolerance:
                 print("Error estimate below tolerance, finished.")
