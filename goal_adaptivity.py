@@ -71,8 +71,11 @@ class GoalAdaptiveNonlinearVariationalSolver():
             high_degree = self.degree + s.dual_extra_degree # By default use dual degree
             high_element = PMGPC.reconstruct_degree(self.element, high_degree)
             Vhigh = FunctionSpace(self.mesh, high_element)
+            solve_uh()
             test = TestFunction(Vhigh) # Dual test function
-            self.u_high = Function(Vhigh) # Dual soluton
+            print("u norm:", assemble(self.u * self.u * dx))
+            self.u_high = Function(Vhigh).interpolate(self.u) # Dual soluton
+            print("u_high norm:", assemble(self.u_high * self.u_high * dx))
             (v_old,) = self.F.arguments()
             v_high = TestFunction(Vhigh)
             F_high = ufl.replace(self.F, {v_old: v_high, self.u: self.u_high})
@@ -245,8 +248,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
         if s.use_adjoint_residual == True:
             (vF,) = self.F.arguments()  # test Argument used in self.F
             # r*(v) = J'(u)[v] - A'_u(u)[v, z]  since self.F = A(u;v) - L(v)
-            rstar_form = derivative(self.J, self.u, vF) - derivative(replace(self.F, {vF: self.z}), self.u, vF)
-
+            #rstar_form = -derivative(self.J, self.u, vF) + derivative(replace(self.F, {vF: self.z}), self.u, vF)
+            rstar_form = ( action(adjoint(derivative(self.F, self.u, TrialFunction(self.V))), self.z_lo) 
+             - derivative(self.J, self.u, TestFunction(self.V)) )
             # dual: project r* → Rcell*, Rfacet*
             Lc_star = self.residual(rstar_form, bubbles*vc)   
             Rcell_star = Function(DG, name="Rcell_star")
@@ -263,6 +267,18 @@ class GoalAdaptiveNonlinearVariationalSolver():
                 + inner(avg(inner(Rfacet_star,    self.u_err)),self.both(test))*dS
                 + inner(inner(Rfacet_star,  self.u_err), test)*ds
             )
+            with eta_dual.dat.vec as evec:
+                evec.abs()    
+                etaT_array = evec.getArray()
+
+            self.eta_dual_total = abs(np.sum(etaT_array))
+            print(f"{'Sum of dual refinement indicators':45s}{'Ση_K:':8s}{self.eta_dual_total:15.12f}")
+            with eta_primal.dat.vec as evec:
+                evec.abs()
+                etaT_array = evec.getArray()
+
+            self.eta_dual_total = abs(np.sum(etaT_array))
+            print(f"{'Sum of primal refinement indicators':45s}{'Ση_K:':8s}{self.eta_dual_total:15.12f}")
 
             self.etaT = assemble(0.5*(eta_primal + eta_dual))
         else:
