@@ -86,9 +86,9 @@ I = Identity(2)
 e2 = as_vector([0.0, 1.0])
 M = 500*dot(dot(nu*grad(u) - p*I, n), e2) * ds_cyl
 
-#M_exact = 0.010618948146 # Exact solution 
-M_exact = 0.03905563
-#M_exact = 0.039055611
+
+M_exact = 0.03616435
+
 tolerance = 0.00000001
 
 sp_primal = {"snes_monitor": None,
@@ -122,6 +122,7 @@ for i, nu_val in enumerate(visc_schedule):
     print("J(u_h) = ", Juh)
 
 print(nu)
+
 problem = NonlinearVariationalProblem(F, t, bcs)
 adaptive_problem = GoalAdaptiveNonlinearVariationalSolver(problem,  M, tolerance, solver_parameters, 
                                                           primal_solver_parameters=sp_primal, dual_solver_parameters=sp_primal, 
