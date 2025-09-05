@@ -73,9 +73,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
             Vhigh = FunctionSpace(self.mesh, high_element)
             solve_uh()
             test = TestFunction(Vhigh) # Dual test function
-            print("u norm:", assemble(self.u * self.u * dx))
+            print("u norm:", assemble(inner(self.u,self.u) * dx))
             self.u_high = Function(Vhigh).interpolate(self.u) # Dual soluton
-            print("u_high norm:", assemble(self.u_high * self.u_high * dx))
+            print("u_high norm:", assemble(inner(self.u_high,self.u_high) * dx))
             (v_old,) = self.F.arguments()
             v_high = TestFunction(Vhigh)
             F_high = ufl.replace(self.F, {v_old: v_high, self.u: self.u_high})
