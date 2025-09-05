@@ -194,8 +194,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
     def automatic_error_indicators(self):
         print("Computing local refinement indicators, η_K...")
         # 7. Compute cell and facet residuals R_T, R_\partialT  
-        self.z_lo.interpolate(self.z) #Default method
-        self.z_err = self.z - self.z_lo
+        z_lo = Function(self.V)
+        z_lo.interpolate(self.z) #Default method
+        self.z_err = self.z - z_lo
         if self.solverctx.use_adjoint_residual == True:
             u_lo = Function(self.V)
             u_lo.interpolate(self.u_high)
