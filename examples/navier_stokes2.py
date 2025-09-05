@@ -40,7 +40,8 @@ solver_parameters = {
     "run_name": "cylinder_lift",
     "output_dir": "output",
     #"uniform_refinement": True
-    #"use_adjoint_residual": True
+    "use_adjoint_residual": True,
+    "dual_low_method": "solve"
 }
 # Define actual problem -----------------------
 degree = 2

@@ -93,8 +93,8 @@ class GoalAdaptiveNonlinearVariationalSolver():
                 solve_uh()
             elif s.primal_low_method == "project":
                 self.u.project(self.u_high)
-            else:
-                self.u.interpolate(self.u_high) # Default - but gives bad results?
+            #else:
+            #    self.u.interpolate(self.u_high) # Default - but gives bad results?
             self.u_err = self.u_high - self.u
         else:
             solve_uh()
@@ -193,7 +193,14 @@ class GoalAdaptiveNonlinearVariationalSolver():
 
     def automatic_error_indicators(self):
         print("Computing local refinement indicators, η_K...")
-        # 7. Compute cell and facet residuals R_T, R_\partialT       
+        # 7. Compute cell and facet residuals R_T, R_\partialT  
+        self.z_lo.interpolate(self.z) #Default method
+        self.z_err = self.z - self.z_lo
+        if self.solverctx.use_adjoint_residual == True:
+            u_lo = Function(self.V)
+            u_lo.interpolate(self.u_high)
+            self.u_err = self.u_high - u_lo
+        
         s = self.solverctx
         dim = self.mesh.topological_dimension()
         cell = self.mesh.ufl_cell()
