@@ -433,6 +433,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
                 self.N_vec[-1], self.Ndual_vec[-1], self.Juh, self.eta_vec[-1], self.etah_vec[-1], self.etaTsum_vec[-1], self.eff1_vec[-1], self.eff2_vec[-1]
             )
         
+        file_path.parent.mkdir(parents=True, exist_ok=True)  # create directories if missing
         file_exists = os.path.exists(file_path)
 
         if it == 0:
