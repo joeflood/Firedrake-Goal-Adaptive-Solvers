@@ -1,4 +1,5 @@
 # Ignore outputs
 output/*
-__pycache__/
+*__pycache__*
 utility_plots/output/
+ngsPETSc/
