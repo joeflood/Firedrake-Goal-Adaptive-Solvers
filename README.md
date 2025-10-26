@@ -2,4 +2,4 @@ We extend the Firedrake framework with an automated goal-based adaptive meshing 
 
 A major barrier to adoption of goal-based adaptivity has been the requirement for error estimators to be manually derived for each PDE problem. Our solver removes the need for manual derivations by automatically computing local error estimators, making goal-based adaptivity accessible to those without specialist expertise (in the dual-weighted residual method, the theory upon which our solver lies). 
 
-For PDEs, we demonstrate efficiency on standard benchmark problems, including mixed formulations such as weakly symmetric linear elasticity. For eigenproblems, we demonstrate strong results for Maxwell and Stokes problems.
+For PDEs, we have demonstrated efficiency on standard benchmark problems, including mixed formulations such as weakly symmetric linear elasticity. For eigenproblems, strong results have been obtained for Maxwell and Stokes problems.
