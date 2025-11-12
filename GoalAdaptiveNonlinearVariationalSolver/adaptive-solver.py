@@ -1,7 +1,7 @@
 from firedrake import *
 from netgen.occ import *
 import csv
-from solver_ctx import SolverCtx
+from GoalAdaptiveNonlinearVariationalSolver.solver_ctx import SolverCtx
 from typing import Callable, Any
 from pathlib import Path
 import numpy as np
@@ -20,7 +20,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
     '''
 
     def __init__(self, problem: NonlinearVariationalProblem, goal_functional, tolerance: float,  solver_parameters: dict,
-                 *, primal_solver_parameters = None, dual_solver_parameters = None, exact_solution = None, exact_goal = None,
+                 *, primal_solver_parameters = None, dual_solver_parameters = None, exact_solution = None, exact_goal = None, verbose = True
                  nullspace = None):
         # User input vars
         self.problem = problem
@@ -32,6 +32,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
         self.goal_exact = exact_goal
         self.solverctx = SolverCtx(solver_parameters) # To store solver parameter data - Unnecessary, could remove in future.
         # Derived vars
+        self.verbose = verbose
         self.V = problem.u.function_space()
         self.u = problem.u
         self.bcs = problem.bcs
@@ -60,10 +61,10 @@ class GoalAdaptiveNonlinearVariationalSolver():
         self.N_vec.append(ndofs)
         def solve_uh():
             if self.sp_primal is None:
-                print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: Default nonlinear solve] ...")
+                self.print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: Default nonlinear solve] ...")
                 NonlinearVariationalSolver(self.problem).solve()
             else:
-                print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: User defined] ...")
+                self.print(f"Solving primal (degree: {self.degree}, dofs: {ndofs}) [Method: User defined] ...")
                 NonlinearVariationalSolver(self.problem, solver_parameters=self.sp_primal).solve()
         
         if s.use_adjoint_residual == True:
@@ -73,9 +74,9 @@ class GoalAdaptiveNonlinearVariationalSolver():
             Vhigh = FunctionSpace(self.mesh, high_element)
             solve_uh()
             test = TestFunction(Vhigh) # Dual test function
-            print("u norm:", assemble(inner(self.u,self.u) * dx))
+            self.print("u norm:", assemble(inner(self.u,self.u) * dx))
             self.u_high = Function(Vhigh).interpolate(self.u) # Dual soluton
-            print("u_high norm:", assemble(inner(self.u_high,self.u_high) * dx))
+            self.print("u_high norm:", assemble(inner(self.u_high,self.u_high) * dx))
             (v_old,) = self.F.arguments()
             v_high = TestFunction(Vhigh)
             F_high = ufl.replace(self.F, {v_old: v_high, self.u: self.u_high})
@@ -83,10 +84,10 @@ class GoalAdaptiveNonlinearVariationalSolver():
             self.problem_high = NonlinearVariationalProblem(F_high, self.u_high, bcs_high)
             
             if self.sp_primal is None:
-                print(f"Solving primal in higher space for error estimate (degree: {high_degree}, dofs: {Vhigh.dim()}) [Method: Default nonlinear solve] ...")
+                self.print(f"Solving primal in higher space for error estimate (degree: {high_degree}, dofs: {Vhigh.dim()}) [Method: Default nonlinear solve] ...")
                 NonlinearVariationalSolver(self.problem_high).solve()
             else:
-                print(f"Solving primal in higher space for error estimate (degree: {high_degree}, dofs: {Vhigh.dim()}) [Method: User defined] ...")
+                self.print(f"Solving primal in higher space for error estimate (degree: {high_degree}, dofs: {Vhigh.dim()}) [Method: User defined] ...")
                 NonlinearVariationalSolver(self.problem_high, solver_parameters=self.sp_primal).solve()
             
             if s.primal_low_method == "solve":
@@ -117,11 +118,11 @@ class GoalAdaptiveNonlinearVariationalSolver():
         bcs_dual  = [bc.reconstruct(V=Vdual, indices=bc._indices, g=0) for bc in self.bcs]
                  
         if self.sp_dual is None:
-            print(f"Solving dual (degree: {dual_degree}, dofs: {ndofs_dual}) [Method: Default nonlinear solve] ...")
+            self.print(f"Solving dual (degree: {dual_degree}, dofs: {ndofs_dual}) [Method: Default nonlinear solve] ...")
             solve(self.G == 0, self.z, bcs_dual)
             
         else:
-            print(f"Solving dual (degree: {dual_degree}, dofs: {ndofs_dual}) [Method: User defined] ...")
+            self.print(f"Solving dual (degree: {dual_degree}, dofs: {ndofs_dual}) [Method: User defined] ...")
             solve(self.G == 0, self.z, bcs_dual, solver_parameters=self.sp_dual)
         
         # zlo
@@ -135,11 +136,11 @@ class GoalAdaptiveNonlinearVariationalSolver():
             bcs_dual_low  = [bc.reconstruct(V=self.V, indices=bc._indices, g=0) for bc in self.bcs]
                     
             if self.sp_dual is None:
-                print(f"Solving dual in V (degree: {self.degree}, dofs: {ndofs}) [Method: Default nonlinear solve] ...")
+                self.print(f"Solving dual in V (degree: {self.degree}, dofs: {ndofs}) [Method: Default nonlinear solve] ...")
                 solve(G_lo == 0, self.z_lo, bcs_dual_low)
                 
             else:
-                print(f"Solving dual in V (degree: {self.degree}, dofs: {ndofs}) [Method: User defined] ...")
+                self.print(f"Solving dual in V (degree: {self.degree}, dofs: {ndofs}) [Method: User defined] ...")
                 solve(G_lo == 0, self.z_lo, bcs_dual_low, solver_parameters=self.sp_dual)
         elif s.dual_low_method == "project":
             self.z_lo.project(self.z)
@@ -164,7 +165,7 @@ class GoalAdaptiveNonlinearVariationalSolver():
         self.etah_vec.append(self.eta_h)
 
         self.Juh = assemble(self.J)
-        print(f"{'Computed goal':45s}{'J(uh):':8s}{self.Juh:15.12f}")
+        self.print(f"{'Computed goal':45s}{'J(uh):':8s}{self.Juh:15.12f}")
 
         if self.u_exact is not None:
             quad_opts = {"quadrature_degree": 20}
@@ -180,19 +181,19 @@ class GoalAdaptiveNonlinearVariationalSolver():
         if self.u_exact is not None or self.goal_exact is not None:
             self.eta = abs(self.Juh - self.Ju)
             self.eta_vec.append(self.eta)
-            print(f"{'Exact goal':45s}{'J(u):':8s}{self.Ju:15.12f}")
-            print(f"{'True error, |J(u) - J(u_h)|':45s}{'η:':8s}{self.eta:15.12f}")
+            self.print(f"{'Exact goal':45s}{'J(u):':8s}{self.Ju:15.12f}")
+            self.print(f"{'True error, |J(u) - J(u_h)|':45s}{'η:':8s}{self.eta:15.12f}")
         
         if s.use_adjoint_residual == True:
-            print(f"{'Primal error, |ρ(u_h;z-z_h)|:':45s}{'η_pri:':8s}{primal_err:15.12f}")
-            print(f"{'Dual error, |ρ*(z_h;u-u_h)|:':45s}{'η_adj:':8s}{dual_err:15.12f}")
-            print(f"{'Difference':35s}{'|η_pri - η_adj|:':18s}{abs(primal_err-dual_err):19.12e}")
-            print(f"{'Predicted error, 0.5|ρ+ρ*|':45s}{'η_h:':8s}{self.eta_h:15.12f}")
+            self.print(f"{'Primal error, |ρ(u_h;z-z_h)|:':45s}{'η_pri:':8s}{primal_err:15.12f}")
+            self.print(f"{'Dual error, |ρ*(z_h;u-u_h)|:':45s}{'η_adj:':8s}{dual_err:15.12f}")
+            self.print(f"{'Difference':35s}{'|η_pri - η_adj|:':18s}{abs(primal_err-dual_err):19.12e}")
+            self.print(f"{'Predicted error, 0.5|ρ+ρ*|':45s}{'η_h:':8s}{self.eta_h:15.12f}")
         else:
-             print(f"{'Predicted error, |ρ(u_h;z-z_h)|':45s}{'η_h:':8s}{self.eta_h:15.12f}")         
+             self.print(f"{'Predicted error, |ρ(u_h;z-z_h)|':45s}{'η_h:':8s}{self.eta_h:15.12f}")         
 
     def automatic_error_indicators(self):
-        print("Computing local refinement indicators, η_K...")
+        self.print("Computing local refinement indicators, η_K...")
         # 7. Compute cell and facet residuals R_T, R_\partialT  
         z_lo = Function(self.V)
         z_lo.interpolate(self.z) #Default method
@@ -280,13 +281,13 @@ class GoalAdaptiveNonlinearVariationalSolver():
                 etaT_array = evec.getArray()
 
             self.eta_dual_total = abs(np.sum(etaT_array))
-            print(f"{'Sum of dual refinement indicators':45s}{'Ση_K:':8s}{self.eta_dual_total:15.12f}")
+            self.print(f"{'Sum of dual refinement indicators':45s}{'Ση_K:':8s}{self.eta_dual_total:15.12f}")
             with eta_primal.dat.vec as evec:
                 evec.abs()
                 etaT_array = evec.getArray()
 
             self.eta_dual_total = abs(np.sum(etaT_array))
-            print(f"{'Sum of primal refinement indicators':45s}{'Ση_K:':8s}{self.eta_dual_total:15.12f}")
+            self.print(f"{'Sum of primal refinement indicators':45s}{'Ση_K:':8s}{self.eta_dual_total:15.12f}")
 
             self.etaT = assemble(0.5*(eta_primal + eta_dual))
         else:
@@ -303,14 +304,14 @@ class GoalAdaptiveNonlinearVariationalSolver():
             udiff = assemble(eta_dual_exact - eta_dual)
             with udiff.dat.vec as uvec:
                 unorm = uvec.norm()
-            print("L2 error in (dual) refinement indicators: ", unorm)
+            self.print("L2 error in (dual) refinement indicators: ", unorm)
 
     def manual_error_indicators(self):
         ''' Currently only implemented for Poisson, but can be overriden. To adapt to other PDEs, replace the form of 
         self.etaT = assemble() to the symbolic form of the error indicators. This form is usually obtained by integrating 
         the weak form by parts (to recover the strong form) and redistributing facet fluxes.
         '''
-        print("[MANUAL] Computing local refinement indicators (η_K)...")
+        self.print("[MANUAL] Computing local refinement indicators (η_K)...")
         s = self.solverctx
         n = FacetNormal(self.mesh)
         DG0 = FunctionSpace(self.mesh, "DG", degree=0)
@@ -328,19 +329,19 @@ class GoalAdaptiveNonlinearVariationalSolver():
 
         self.etaT_total = abs(np.sum(self.etaT_array))
         self.etaTsum_vec.append(self.etaT_total)
-        print(f"{'Sum of refinement indicators':45s}{'Ση_K:':8s}{self.etaT_total:15.12f}")
+        self.print(f"{'Sum of refinement indicators':45s}{'Ση_K:':8s}{self.etaT_total:15.12f}")
 
         if self.u_exact is not None or self.goal_exact is not None:
             # Compute efficiency indices
             self.eff1 = self.eta_h/self.eta
             self.eff2 = self.etaT_total/self.eta
-            print(f"{'Effectivity index 1':45s}{'η_h/η:':8s}{self.eff1:7.4f}")
-            print(f"{'Effectivity index 2':45s}{'Ση_K/η:':8s}{self.eff2:7.4f}")
+            self.print(f"{'Effectivity index 1':45s}{'η_h/η:':8s}{self.eff1:7.4f}")
+            self.print(f"{'Effectivity index 2':45s}{'Ση_K/η:':8s}{self.eff2:7.4f}")
             self.eff1_vec.append(self.eff1)
             self.eff2_vec.append(self.eff2)
         else:
             self.eff3 = self.etaT_total/self.eta_h
-            print(f"{'Effectivity index:':45s}{'Ση_K/η_h:':8s}{self.eff3:7.4f}")
+            self.print(f"{'Effectivity index:':45s}{'Ση_K/η_h:':8s}{self.eff3:7.4f}")
             self.eff3_vec.append(self.eff3)
 
     def mark_cells(self):
@@ -367,31 +368,6 @@ class GoalAdaptiveNonlinearVariationalSolver():
         markers_space = FunctionSpace(self.mesh, "DG", 0)
         self.markers = Function(markers_space)
         self.markers.assign(1)        
-
-    def refine_mesh(self):
-        print("Refining mesh ...")
-        new_mesh = self.mesh.refine_marked_elements(self.markers)
-        print("Transferring problem to new mesh ...")
-        amh = AdaptiveMeshHierarchy([self.mesh])
-        atm = AdaptiveTransferManager()
-        amh.add_mesh(new_mesh)
-        coef_map = {}
-        if self.u_exact is not None:
-            def as_mixed(exprs):
-                return as_vector([e[idx] for e in exprs for idx in np.ndindex(e.ufl_shape)])
-            if type(self.u_exact) == list or type(self.u_exact) == tuple:
-                u_exact_vec = as_mixed(self.u_exact)
-                self.u_exact = refine(u_exact_vec, refine, coefficient_mapping=coef_map)
-            else:
-                self.u_exact = refine(self.u_exact, refine, coefficient_mapping=coef_map)
-        self.problem = refine(self.problem, refine, coefficient_mapping=coef_map)
-        self.J = refine(self.J, refine, coefficient_mapping=coef_map)
-        self.F = self.problem.F
-        self.u = self.problem.u
-        self.bcs = self.problem.bcs
-        self.V = self.u.function_space()
-        self.problem = NonlinearVariationalProblem(self.F,self.u,self.bcs)
-        self.mesh = new_mesh
        
     def write_data(self):
         s = self.solverctx
@@ -445,56 +421,10 @@ class GoalAdaptiveNonlinearVariationalSolver():
             with open(file_path, "a", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerow(row)
-    
-    def write_mesh(self,it):
-        s = self.solverctx
-        should_write = False
-        if s.write_mesh == "all":
-            should_write = True
-        elif s.write_mesh == "first_and_last":
-                if it == 0 or it == s.max_iterations:
-                    should_write = True
-        elif s.write_mesh == "by_iteration":
-                # Case A: user gave specific iterations (list/tuple/set)
-                if getattr(s, "write_mesh_iteration_vector", None) is not None:
-                    # allow any iterable; convert to set for O(1) lookup
-                    targets = set(s.write_iteration_vector)
-                    should_write = it in targets
-                # Case B: otherwise use interval (positive int)
-                elif getattr(s, "write_mesh_iteration_interval", None) is not None:
-                    interval = int(s.write_iteration_interval)
-                    if interval <= 0:
-                        raise ValueError("write_mesh_iteration_interval must be a positive integer")
-                    should_write = (it % interval == 0)  # includes it=0
-        if should_write:
-            print("Writing mesh ...")
-            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_mesh_{it}.pvd").write(self.mesh)
 
-    def write_solution(self,it):
-        s = self.solverctx
-        should_write = False
-        if s.write_solution == "all":
-            should_write = True
-        elif s.write_solution == "first_and_last":
-                if it == 0 or it == s.max_iterations:
-                    should_write = True
-        elif s.write_solution == "by_iteration":
-                # Case A: user gave specific iterations (list/tuple/set)
-                if getattr(s, "write_solution_iteration_vector", None) is not None:
-                    # allow any iterable; convert to set for O(1) lookup
-                    targets = set(s.write_iteration_vector)
-                    should_write = it in targets
-                # Case B: otherwise use interval (positive int)
-                elif getattr(s, "write_solution_iteration_interval", None) is not None:
-                    interval = int(s.write_iteration_interval)
-                    if interval <= 0:
-                        raise ValueError("write_solution_iteration_interval must be a positive integer")
-                    should_write = (it % interval == 0)  # includes it=0
-        if should_write:
-            print("Writing (primal) solution ...")
-            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_solution_{it}.pvd").write(*self.u.subfunctions)
-            print("Writing (dual) solution ...")
-            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_dual_solution_{it}.pvd").write(*self.z.subfunctions)
+    def print(self, *args, **kwargs):
+        if self.verbose:
+            PETSc.Sys.Print(*args, **kwargs)
 
     def solve(self):
         s = self.solverctx
@@ -581,6 +511,58 @@ def refine_function(expr, self, coefficient_mapping=None):
             manager.prolong(expr, new)
         coefficient_mapping[expr] = new
     return new
+
+
+# Writing functions: --------------------------------------
+def write_solution(self,it):
+        s = self.solverctx
+        should_write = False
+        if s.write_solution == "all":
+            should_write = True
+        elif s.write_solution == "first_and_last":
+                if it == 0 or it == s.max_iterations:
+                    should_write = True
+        elif s.write_solution == "by_iteration":
+                # Case A: user gave specific iterations (list/tuple/set)
+                if getattr(s, "write_solution_iteration_vector", None) is not None:
+                    # allow any iterable; convert to set for O(1) lookup
+                    targets = set(s.write_iteration_vector)
+                    should_write = it in targets
+                # Case B: otherwise use interval (positive int)
+                elif getattr(s, "write_solution_iteration_interval", None) is not None:
+                    interval = int(s.write_iteration_interval)
+                    if interval <= 0:
+                        raise ValueError("write_solution_iteration_interval must be a positive integer")
+                    should_write = (it % interval == 0)  # includes it=0
+        if should_write:
+            print("Writing (primal) solution ...")
+            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_solution_{it}.pvd").write(*self.u.subfunctions)
+            print("Writing (dual) solution ...")
+            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_dual_solution_{it}.pvd").write(*self.z.subfunctions)
+
+def write_mesh(self,it):
+        s = self.solverctx
+        should_write = False
+        if s.write_mesh == "all":
+            should_write = True
+        elif s.write_mesh == "first_and_last":
+                if it == 0 or it == s.max_iterations:
+                    should_write = True
+        elif s.write_mesh == "by_iteration":
+                # Case A: user gave specific iterations (list/tuple/set)
+                if getattr(s, "write_mesh_iteration_vector", None) is not None:
+                    # allow any iterable; convert to set for O(1) lookup
+                    targets = set(s.write_iteration_vector)
+                    should_write = it in targets
+                # Case B: otherwise use interval (positive int)
+                elif getattr(s, "write_mesh_iteration_interval", None) is not None:
+                    interval = int(s.write_iteration_interval)
+                    if interval <= 0:
+                        raise ValueError("write_mesh_iteration_interval must be a positive integer")
+                    should_write = (it % interval == 0)  # includes it=0
+        if should_write:
+            print("Writing mesh ...")
+            VTKFile(self.output_dir / f"{s.run_name}/{s.run_name}_mesh_{it}.pvd").write(self.mesh)
 
 # Only required for my examples:
 def getlabels(mesh, codim):
