@@ -1,8 +1,6 @@
 from firedrake import *
 from netgen.occ import *
 import sys
-from goal_adaptivity import GoalAdaptiveNonlinearVariationalSolver
-from goal_adaptivity import getlabels
 
 # Define initial mesh ---------------------
 initial_mesh_size = 0.2
@@ -30,7 +28,7 @@ mesh = Mesh(unit_square.GenerateMesh(maxh=initial_mesh_size))
 # Define solver parameters ---------------------
 solver_parameters = {
     "max_iterations": 20,
-    "output_dir": "output/conv-diff-new",
+    "output_dir": "output/poisson_2d",
     #"uniform_refinement": True
     #"use_adjoint_residual": True
 }
@@ -52,18 +50,20 @@ J = dot(grad(u), n) * ds
 tolerance = 0.0001
 
 sp_dual = {"snes_type": "ksponly",
-            "ksp_type": "cg",
+            "ksp_type": "preonly",
             "ksp_rtol": 1.0e-3,
             "ksp_max_it": 5,
             "ksp_convergence_test": "skip",
             "ksp_monitor": None,
-            "pc_type": "python",
+            "pc_type": "cholesky",
+            "pc_factor_mat_solver_type": "mumps",
             "pc_python_type": "firedrake.ASMStarPC",
             "pc_star_mat_ordering_type": "metisnd",
             "pc_star_sub_sub_pc_type": "cholesky"
             }
 
 sp_primal = {"pc_type": "cholesky",
+            "ksp_monitor": None,
             "pc_factor_mat_solver_type": "mumps"}
 
 problem = NonlinearVariationalProblem(F, u, bcs)
